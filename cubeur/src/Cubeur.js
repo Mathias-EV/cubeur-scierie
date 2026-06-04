@@ -24,19 +24,27 @@ function calcul(f){
   const vu=round(ep*la*lo,6), vc=round(vu*nb,4), rend=round(vc/vg,4);
   return { volumeUnit:vu, volumeCharge:vc, rendement:rend, perte:round(1-rend,4) };
 }
-// Calcul sans grume (pour cubage ligne commande)
-function calculSansGrume(f){
-  const ep=parseFloat(f.epaisseur)/1000, la=parseFloat(f.largeur)/1000,
-        lo=parseFloat(f.longueur), nb=parseFloat(f.nbUnites);
-  if(!ep||!la||!lo||!nb) return null;
-  const vu=round(ep*la*lo,6), vc=round(vu*nb,4);
-  return { volumeUnit:vu, volumeCharge:vc };
-}
 function pct(n){ return (n*100).toFixed(1)+" %"; }
 function m3f(n){ return parseFloat(n).toFixed(4)+" m³"; }
 function genId(){ return "CMD-"+Date.now().toString(36).toUpperCase().slice(-6); }
 function today(){ return new Date().toISOString().split("T")[0]; }
 function fmtDate(){ return new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+
+// ─── APPEL API SCRIPT (avec gestion CORS propre) ──────────────────────────────
+async function callScript(url, body){
+  // On tente d'abord avec credentials omit pour éviter les preflight CORS
+  try {
+    const r = await fetch(url, {
+      method:"POST",
+      mode:"no-cors",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body)
+    });
+    return { ok: true };
+  } catch(e) {
+    throw e;
+  }
+}
 
 // ─── COMPOSANTS UI ────────────────────────────────────────────────────────────
 function Toast({toast}){
@@ -89,9 +97,7 @@ function Spinner(){ return <div style={S.spinner}/>; }
 
 // ─── ÉCRAN D'ACCUEIL ─────────────────────────────────────────────────────────
 function Login({onLogin}){
-  const [code,setCode]   = useState("");
-  const [error,setError] = useState("");
-  const [shake,setShake] = useState(false);
+  const [code,setCode]=useState(""); const [error,setError]=useState(""); const [shake,setShake]=useState(false);
   const tryLogin=()=>{
     if(code===CODE_VENDEUR){ onLogin("vendeur"); return; }
     if(code===CODE_SCIEUR){  onLogin("scieur");  return; }
@@ -116,10 +122,8 @@ function Login({onLogin}){
         <div style={S.loginDivider}/>
         <div style={S.loginLabel}>Code d'accès</div>
         <input style={{...S.loginInput,...(error?{borderColor:"#e07a5f"}:{})}}
-          type="password" value={code}
-          onChange={e=>setCode(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&tryLogin()}
-          placeholder="••••" maxLength={8} autoFocus/>
+          type="password" value={code} onChange={e=>setCode(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&tryLogin()} placeholder="••••" maxLength={8} autoFocus/>
         {error&&<div style={S.loginError}>{error}</div>}
         <button style={S.loginBtn} onClick={tryLogin}>Entrer</button>
         <div style={S.loginHint}>
@@ -134,13 +138,12 @@ function Login({onLogin}){
 
 // ─── APP VENDEUR ──────────────────────────────────────────────────────────────
 function AppVendeur({scriptUrl,onLogout,showToast}){
-  const [tab,setTab]          = useState("new");
-  const [form,setForm]        = useState(initCmd);
-  const [mesCommandes,setMes] = useState([]);
-  const [loading,setLoading]  = useState(false);
-  const [submitting,setSub]   = useState(false);
-  const [confirmDel,setConfirmDel] = useState(null);
-  const [deleting,setDeleting]= useState(false);
+  const [tab,setTab]=useState("new");
+  const [form,setForm]=useState(initCmd);
+  const [mesCommandes,setMes]=useState([]);
+  const [submitting,setSub]=useState(false);
+  const [confirmDel,setConfirmDel]=useState(null);
+  const [deleting,setDeleting]=useState(false);
 
   const setField=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
   const setLigne=(idx,field)=>e=>{
@@ -148,52 +151,35 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
   };
   const addLigne=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const removeLigne=idx=>setForm(p=>({...p,lignes:p.lignes.filter((_,i)=>i!==idx)}));
-  const isValid=form.client&&form.dateLivraison&&form.lignes.length>0&&
-    form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
+  const isValid=form.client&&form.dateLivraison&&form.lignes.length>0&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
 
-  const loadCommandes=useCallback(()=>{
-    const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
-    setMes(saved);
-  },[]);
-  useEffect(()=>{ loadCommandes(); },[loadCommandes]);
+  useEffect(()=>{ setMes(JSON.parse(localStorage.getItem("mes_commandes")||"[]")); },[]);
 
   const soumettre=async()=>{
-    if(!isValid) return;
-    if(!scriptUrl){ showToast("URL Apps Script manquante","error"); return; }
+    if(!isValid||!scriptUrl){ if(!scriptUrl) showToast("URL Apps Script manquante","error"); return; }
     setSub(true);
     const id=genId(), dateCreation=fmtDate();
     const rows=form.lignes.map((l,i)=>[
-      i===0?id:"", form.client,
-      l.produit,l.essence,l.qualite,
+      i===0?id:"", form.client, l.produit,l.essence,l.qualite,
       l.epaisseur,l.largeur,l.longueur,l.quantite,
       form.dateLivraison, i===0?form.notes:"", "attente", i===0?dateCreation:""
     ]);
     try{
-      await fetch(scriptUrl,{method:"POST",mode:"no-cors",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({type:"commande",rows,id})});
+      await callScript(scriptUrl,{type:"commande",rows,id});
       const cmd={...form,id,statut:"attente",dateCreation};
       const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
-      saved.unshift(cmd);
-      localStorage.setItem("mes_commandes",JSON.stringify(saved));
+      saved.unshift(cmd); localStorage.setItem("mes_commandes",JSON.stringify(saved));
       setMes(saved); setForm(initCmd); setTab("mes-commandes");
       showToast(`Commande ${id} envoyée ✓`);
     }catch(e){ showToast("Erreur d'envoi","error"); }
     setSub(false);
   };
 
-  // Suppression locale + Sheet
   const supprimerCommande=async(id)=>{
     setDeleting(true);
-    // Supprimer du Sheet si URL disponible
     if(scriptUrl){
-      try{
-        await fetch(scriptUrl,{method:"POST",mode:"no-cors",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({type:"deleteCommande",id})});
-      }catch(e){}
+      try{ await callScript(scriptUrl,{type:"deleteCommande",id}); }catch(e){}
     }
-    // Supprimer localement
     const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
     const updated=saved.filter(c=>c.id!==id);
     localStorage.setItem("mes_commandes",JSON.stringify(updated));
@@ -213,6 +199,8 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
         <button style={S.btnLogout} onClick={onLogout}>⇤ Déconnexion</button>
       </header>
       <main style={S.main}>
+
+        {/* ── NOUVELLE COMMANDE ── */}
         {tab==="new"&&(
           <div style={S.page}>
             <Card title="Informations commande">
@@ -223,7 +211,6 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
                 <Inp type="date" value={form.dateLivraison} onChange={setField("dateLivraison")} min={today()}/>
               </Field>
             </Card>
-
             {form.lignes.map((lg,idx)=>(
               <Card key={idx} title={`Produit ${form.lignes.length>1?idx+1:""}`}
                 accent={idx===0?"rgba(212,168,83,0.3)":"rgba(212,168,83,0.12)"}>
@@ -248,17 +235,14 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
                 )}
               </Card>
             ))}
-
             <button style={{...S.btnBig,background:"rgba(212,168,83,0.08)",color:"#D4A853",
               border:"1px solid rgba(212,168,83,0.3)",marginBottom:10}} onClick={addLigne}>
               + Ajouter un produit
             </button>
-
             <Card title="Notes">
               <textarea style={{...S.input,minHeight:60,resize:"vertical"}}
                 value={form.notes} onChange={setField("notes")} placeholder="Instructions particulières..."/>
             </Card>
-
             <button style={{...S.btnBig,...(!isValid||submitting?S.btnDis:{})}}
               onClick={soumettre} disabled={!isValid||submitting}>
               {submitting?<Spinner/>:"📤 Envoyer la commande"}
@@ -266,6 +250,7 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
           </div>
         )}
 
+        {/* ── MES COMMANDES ── */}
         {tab==="mes-commandes"&&(
           <div style={S.page}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
@@ -279,7 +264,7 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
                   <div style={{textAlign:"center",padding:"8px 0"}}>
                     <div style={{color:"#e07a5f",fontSize:13,marginBottom:12}}>
                       Supprimer <strong>{c.id}</strong> ?<br/>
-                      <span style={{fontSize:11,color:"#6a5a4a"}}>Suppression dans le Sheet et en local</span>
+                      <span style={{fontSize:11,color:"#6a5a4a"}}>Suppression locale + dans le Sheet</span>
                     </div>
                     <div style={{display:"flex",gap:10,justifyContent:"center"}}>
                       <button style={{...S.btnSmall,color:"#e07a5f",borderColor:"rgba(224,122,95,0.4)"}}
@@ -298,8 +283,7 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
                       </div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <Badge status={c.statut||"attente"}/>
-                        <button style={{...S.btnDel,padding:"4px 8px",fontSize:12}}
-                          onClick={()=>setConfirmDel(c.id)}>🗑</button>
+                        <button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button>
                       </div>
                     </div>
                     {c.lignes&&c.lignes.length>0?(
@@ -307,13 +291,12 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
                         {c.lignes.map((l,i)=>(
                           <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
                             • {l.produit}{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
-                            {l.epaisseur?<span style={{color:"#6a5a4a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite} u.</span>:null}
+                            {l.epaisseur&&<span style={{color:"#6a5a4a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite} u.</span>}
                           </div>
                         ))}
                       </div>
                     ):(
-                      <div style={{fontSize:13,color:"#a09080",marginBottom:4}}>
-                        {c.produit}{c.essence?` · ${c.essence}`:""}</div>
+                      <div style={{fontSize:13,color:"#a09080",marginBottom:4}}>{c.produit}{c.essence?` · ${c.essence}`:""}</div>
                     )}
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6a5a4a"}}>
                       <span>Livraison : <strong style={{color:"#c4b09a"}}>{c.dateLivraison}</strong></span>
@@ -339,22 +322,27 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
 
 // ─── APP SCIEUR ───────────────────────────────────────────────────────────────
 function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
-  const [tab,setTab]           = useState("arealiser");
-  const [commandes,setCmd]     = useState([]);
-  const [loading,setLoading]   = useState(false);
-  // Onglet "À réaliser" — état cubage par commande
-  const [realiser,setRealiser] = useState({}); // {cmdId: {volumeGrume, lignes:[{nbUnites,...}], exported, exporting}}
-  const [expandCmd,setExpand]  = useState(null); // cmdId ouvert
-  // Onglet cubage libre
-  const [cubeForm,setCube]     = useState(initCube);
-  const [history,setHistory]   = useState(()=>JSON.parse(localStorage.getItem("cube_history")||"[]"));
-  const [exporting,setExp]     = useState({});
-  const [exportedIds]          = useState(()=>new Set(JSON.parse(localStorage.getItem("exported_ids")||"[]")));
-  const pollingRef             = useRef(null);
+  const [tab,setTab]       = useState("arealiser");
+  const [commandes,setCmd] = useState([]);
+  const [loading,setLoading]= useState(false);
+  const [expandCmd,setExpand]= useState(null);
 
+  // realiser[cmdId] = { lignes:[{...ligneData, nbUnites, volumeGrume, volUnit, volCharge, rend, perte, exporting, exported}] }
+  const [realiser,setRealiser] = useState({});
+
+  // Cubage libre
+  const [cubeForm,setCube] = useState(initCube);
+  const [history,setHistory]= useState(()=>JSON.parse(localStorage.getItem("cube_history")||"[]"));
+  const [exporting,setExp] = useState({});
+  const [exportedIds]      = useState(()=>new Set(JSON.parse(localStorage.getItem("exported_ids")||"[]")));
+
+  // Historique commandes réalisées (local)
+  const [historiqueCmds,setHistCmds] = useState(()=>JSON.parse(localStorage.getItem("historique_cmds")||"[]"));
+
+  const pollingRef = useRef(null);
   const markExp=(id)=>{ exportedIds.add(id); localStorage.setItem("exported_ids",JSON.stringify([...exportedIds])); };
 
-  // ── Charger commandes ──
+  // ── Charger commandes depuis Sheet ──
   const loadCommandes=useCallback(async(silent=false)=>{
     if(!scriptUrl) return;
     if(!silent) setLoading(true);
@@ -375,105 +363,97 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     return ()=>clearInterval(pollingRef.current);
   },[loadCommandes]);
 
-  // ── Initialiser l'état cubage d'une commande ──
+  // ── Initialiser cubage d'une commande ──
   const initRealiser=(cmd)=>{
-    if(realiser[cmd.id]) return; // déjà initialisé
+    if(realiser[cmd.id]) return;
     const lignes=(cmd.lignes||[]).map(l=>({
       ...l,
       nbUnites: l.quantite||"",
       volumeGrume: "",
-      result: null
+      volUnit: null, volCharge: null, rend: null, perte: null,
+      exporting: false, exported: false
     }));
-    setRealiser(r=>({...r,[cmd.id]:{volumeGrume:"",lignes,exported:false,exporting:false}}));
+    setRealiser(r=>({...r,[cmd.id]:{lignes}}));
   };
 
-  const setRealiserField=(cmdId,field,value)=>{
-    setRealiser(r=>({...r,[cmdId]:{...r[cmdId],[field]:value}}));
-  };
-
-  const setLigneField=(cmdId,idx,field,value)=>{
+  // ── Mettre à jour une ligne ──
+  const setLigneVal=(cmdId,idx,field,value)=>{
     setRealiser(r=>{
       const ls=[...r[cmdId].lignes];
-      ls[idx]={...ls[idx],[field]:value};
-      // Recalculer résultat si possible
-      const vg=parseFloat(r[cmdId].volumeGrume)||0;
-      if(field==="nbUnites"||field==="epaisseur"||field==="largeur"||field==="longueur"){
-        const updated={...ls[idx],[field]:value};
-        const ep=parseFloat(updated.epaisseur)/1000, la=parseFloat(updated.largeur)/1000,
-              lo=parseFloat(updated.longueur), nb=parseFloat(updated.nbUnites);
-        if(ep&&la&&lo&&nb) updated.volUnit=round(ep*la*lo,6), updated.volCharge=round(ep*la*lo*nb,4);
-        ls[idx]=updated;
+      const l={...ls[idx],[field]:value};
+      // recalcul auto
+      const ep=parseFloat(field==="epaisseur"?value:l.epaisseur)/1000;
+      const la=parseFloat(field==="largeur"?value:l.largeur)/1000;
+      const lo=parseFloat(field==="longueur"?value:l.longueur);
+      const nb=parseFloat(field==="nbUnites"?value:l.nbUnites);
+      const vg=parseFloat(field==="volumeGrume"?value:l.volumeGrume);
+      if(ep>0&&la>0&&lo>0&&nb>0){
+        l.volUnit=round(ep*la*lo,6);
+        l.volCharge=round(ep*la*lo*nb,4);
+        if(vg>0){ l.rend=round(l.volCharge/vg,4); l.perte=round(1-l.rend,4); }
+        else { l.rend=null; l.perte=null; }
       }
+      ls[idx]=l;
       return {...r,[cmdId]:{...r[cmdId],lignes:ls}};
     });
   };
 
-  // Recalculer rendement global quand volumeGrume change
-  const setVolumeGrume=(cmdId,value)=>{
-    setRealiser(r=>{
-      const vg=parseFloat(value)||0;
-      const ls=r[cmdId].lignes.map(l=>{
-        const ep=parseFloat(l.epaisseur)/1000, la=parseFloat(l.largeur)/1000,
-              lo=parseFloat(l.longueur), nb=parseFloat(l.nbUnites);
-        if(ep&&la&&lo&&nb){
-          l={...l,volUnit:round(ep*la*lo,6),volCharge:round(ep*la*lo*nb,4)};
-        }
-        return l;
-      });
-      return {...r,[cmdId]:{...r[cmdId],volumeGrume:value,lignes:ls}};
-    });
-  };
+  const lignePrete=(l)=> l.nbUnites && l.epaisseur && l.largeur && l.longueur && l.volumeGrume && !l.exported;
 
-  // Volume total produit pour cette commande
-  const volTotalCmd=(cmdId)=>{
-    const st=realiser[cmdId];
-    if(!st) return 0;
-    return st.lignes.reduce((s,l)=>s+(l.volCharge||0),0);
-  };
-
-  // Tout est rempli pour valider
-  const cmdPretAValider=(cmdId)=>{
-    const st=realiser[cmdId];
-    if(!st||!st.volumeGrume) return false;
-    return st.lignes.every(l=>l.nbUnites&&l.epaisseur&&l.largeur&&l.longueur);
-  };
-
-  // ── Valider et exporter commande complète ──
-  const validerCommande=async(cmd)=>{
+  // ── Valider UN produit ──
+  const validerLigne=async(cmd, idx)=>{
     const st=realiser[cmd.id];
     if(!st||!scriptUrl){ showToast("URL Apps Script manquante","error"); return; }
-    setRealiser(r=>({...r,[cmd.id]:{...r[cmd.id],exporting:true}}));
-    const date=fmtDate();
-    const vg=parseFloat(st.volumeGrume)||0;
-    const volTotal=volTotalCmd(cmd.id);
-    const rendGlobal=vg>0?round(volTotal/vg,4):0;
+    const l=st.lignes[idx];
+    if(!lignePrete(l)) return;
 
-    // Exporter chaque ligne produit dans onglet Scieur
-    const rows=st.lignes.map(l=>([
-      date, cmd.id, l.produit, l.essence, l.qualite||"",
-      l.epaisseur, l.largeur, l.longueur, l.nbUnites,
-      vg, l.volUnit||0, l.volCharge||0,
-      vg>0&&l.volCharge?round(l.volCharge/vg,4):0,
-      vg>0&&l.volCharge?round(1-l.volCharge/vg,4):0
-    ]));
+    // Marquer exporting
+    setRealiser(r=>{ const ls=[...r[cmd.id].lignes]; ls[idx]={...ls[idx],exporting:true}; return {...r,[cmd.id]:{...r[cmd.id],lignes:ls}}; });
+
+    const date=fmtDate();
+    const ep=parseFloat(l.epaisseur)/1000, la=parseFloat(l.largeur)/1000,
+          lo=parseFloat(l.longueur), nb=parseFloat(l.nbUnites), vg=parseFloat(l.volumeGrume);
+    const vu=round(ep*la*lo,6), vc=round(ep*la*lo*nb,4);
+    const rend=vg>0?round(vc/vg,4):0, perte=round(1-rend,4);
+
+    const row=[date, cmd.id, l.produit, l.essence, l.qualite||"",
+      l.epaisseur, l.largeur, l.longueur, nb, vg, vu, vc, rend, perte];
+    const ligneId=`${cmd.id}-${idx}-${Date.now()}`;
 
     try{
-      // Envoyer cubage (toutes les lignes)
-      await fetch(scriptUrl,{method:"POST",mode:"no-cors",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({type:"cubageCommande",cmdId:cmd.id,rows,id:cmd.id+"-"+Date.now()})});
-      // Mettre à jour statut → valide (toutes les lignes du Sheet)
-      await fetch(scriptUrl,{method:"POST",mode:"no-cors",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({type:"updateStatut",id:cmd.id,statut:"valide",date})});
-      // Mettre à jour état local
-      setCmd(c=>c.map(x=>x.id===cmd.id?{...x,statut:"valide"}:x));
-      setRealiser(r=>({...r,[cmd.id]:{...r[cmd.id],exported:true,exporting:false}}));
-      setExpand(null);
-      showToast(`Commande ${cmd.id} validée ✓`);
+      await callScript(scriptUrl,{type:"cubage",row,id:ligneId});
+      // Vérifier si toutes les lignes sont exportées après celle-ci
+      const lignesAjour=[...st.lignes];
+      lignesAjour[idx]={...lignesAjour[idx],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte};
+      const toutesValidees=lignesAjour.every(l2=>l2.exported);
+
+      if(toutesValidees){
+        // Mettre statut commande → valide dans Sheet
+        try{ await callScript(scriptUrl,{type:"updateStatut",id:cmd.id,statut:"valide",date}); }catch(e){}
+        setCmd(c=>c.map(x=>x.id===cmd.id?{...x,statut:"valide"}:x));
+        // Sauvegarder dans historique local
+        const hEntry={
+          id:cmd.id, client:cmd.client, dateLivraison:cmd.dateLivraison||cmd.datelivraison,
+          dateValidation:date,
+          lignes:lignesAjour.map(l2=>({
+            produit:l2.produit,essence:l2.essence,qualite:l2.qualite,
+            epaisseur:l2.epaisseur,largeur:l2.largeur,longueur:l2.longueur,
+            nbUnites:l2.nbUnites,volumeGrume:l2.volumeGrume,
+            volUnit:l2.volUnit,volCharge:l2.volCharge,rend:l2.rend,perte:l2.perte
+          }))
+        };
+        const hist=[hEntry,...JSON.parse(localStorage.getItem("historique_cmds")||"[]")];
+        localStorage.setItem("historique_cmds",JSON.stringify(hist));
+        setHistCmds(hist);
+        showToast(`✓ Commande ${cmd.id} entièrement validée !`);
+        setExpand(null);
+      } else {
+        setRealiser(r=>{ const ls=[...r[cmd.id].lignes]; ls[idx]={...ls[idx],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}; return {...r,[cmd.id]:{...r[cmd.id],lignes:ls}}; });
+        showToast(`Produit ${idx+1} exporté ✓`);
+      }
     }catch(e){
-      showToast("Envoyé (vérifier le Sheet)");
-      setRealiser(r=>({...r,[cmd.id]:{...r[cmd.id],exported:true,exporting:false}}));
+      setRealiser(r=>{ const ls=[...r[cmd.id].lignes]; ls[idx]={...ls[idx],exporting:false}; return {...r,[cmd.id]:{...r[cmd.id],lignes:ls}}; });
+      showToast("Erreur réseau — réessaie","error");
     }
   };
 
@@ -481,16 +461,13 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   const setC=f=>e=>setCube(p=>({...p,[f]:e.target.value}));
   const cubeRes=calcul(cubeForm);
   const cubeValid=cubeRes&&cubeForm.produit&&cubeForm.essence&&cubeForm.qualite;
-
   const addCube=()=>{
     if(!cubeValid) return;
     const entry={...cubeForm,...cubeRes,id:Date.now(),cmdId:null,date:fmtDate()};
     const nh=[entry,...history];
     setHistory(nh); localStorage.setItem("cube_history",JSON.stringify(nh));
-    showToast("Charge cubée ✓");
-    setCube(initCube);
+    showToast("Charge cubée ✓"); setCube(initCube);
   };
-
   const exportCube=async(entry)=>{
     if(!scriptUrl){ showToast("URL Apps Script manquante","error"); return; }
     if(exportedIds.has(String(entry.id))){ showToast("Déjà exporté !","warn"); return; }
@@ -499,9 +476,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
       entry.epaisseur,entry.largeur,entry.longueur,entry.nbUnites,
       entry.volumeGrume,entry.volumeUnit,entry.volumeCharge,entry.rendement,entry.perte];
     try{
-      await fetch(scriptUrl,{method:"POST",mode:"no-cors",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({type:"cubage",row,id:String(entry.id)})});
+      await callScript(scriptUrl,{type:"cubage",row,id:String(entry.id)});
       markExp(String(entry.id));
       setHistory(h=>h.map(e=>e.id===entry.id?{...e,exported:true}:e));
       showToast("Exporté vers Google Sheets ✓");
@@ -545,163 +520,181 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
             {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#D4A853",fontSize:13}}>
               ⚠ Configure l'URL Apps Script dans l'onglet ⚙ Config
             </div>}
-            {cmdARealiser.length===0&&scriptUrl&&!loading&&
-              <Empty icon="✅" text="Aucune commande à réaliser"/>}
+            {cmdARealiser.length===0&&scriptUrl&&!loading&&<Empty icon="✅" text="Aucune commande à réaliser"/>}
 
-            {/* Commandes à réaliser (attente + production) */}
             {cmdARealiser.map(cmd=>{
               const isOpen=expandCmd===cmd.id;
               const st=realiser[cmd.id];
-              const pret=cmdPretAValider(cmd.id);
-              const volTotal=volTotalCmd(cmd.id);
-              const vg=parseFloat(st?.volumeGrume)||0;
-              const rend=vg>0&&volTotal>0?round(volTotal/vg,4):null;
+              const nbExported=st?st.lignes.filter(l=>l.exported).length:0;
+              const nbTotal=(cmd.lignes||[]).length;
 
               return (
                 <div key={cmd.id} style={{...S.card,marginBottom:12,
                   borderColor:isOpen?"rgba(91,184,212,0.4)":"rgba(212,168,83,0.12)"}}>
-                  {/* Entête commande */}
+
+                  {/* Entête */}
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                     <div>
                       <div style={{fontSize:11,color:"#5bb8d4",letterSpacing:"0.08em"}}>{cmd.id}</div>
                       <div style={{fontWeight:700,color:"#e8ddd0",fontSize:15}}>{cmd.client}</div>
                     </div>
-                    <Badge status={cmd.statut||"attente"}/>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                      <Badge status={cmd.statut||"attente"}/>
+                      {st&&<span style={{fontSize:10,color:"#6dbf7e"}}>{nbExported}/{nbTotal} produit{nbTotal>1?"s":""}</span>}
+                    </div>
                   </div>
                   <div style={{fontSize:12,color:"#6a5a4a",marginBottom:6}}>
-                    📅 Livraison : <strong style={{color:"#c4b09a"}}>{cmd.dateLivraison||cmd.datelivraison}</strong>
+                    📅 <strong style={{color:"#c4b09a"}}>{cmd.dateLivraison||cmd.datelivraison}</strong>
+                    {cmd.notes&&<span style={{color:"#8a7a68",fontStyle:"italic"}}> · "{cmd.notes}"</span>}
                   </div>
-                  {/* Liste produits résumé */}
+
+                  {/* Résumé produits */}
                   <div style={{marginBottom:10}}>
-                    {(cmd.lignes||[]).map((l,i)=>(
-                      <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2,
-                        padding:"4px 8px",background:"rgba(255,255,255,0.02)",borderRadius:6}}>
-                        <span style={{color:"#D4A853",fontWeight:700}}>• {l.produit}</span>
-                        {l.essence?<span style={{color:"#8a7a68"}}> · {l.essence}</span>:null}
-                        {l.qualite?<span style={{color:"#6a5a4a"}}> · {l.qualite}</span>:null}
-                        {l.epaisseur?<span style={{color:"#5a4a3a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite} u.</span>:null}
-                      </div>
-                    ))}
+                    {(cmd.lignes||[]).map((l,i)=>{
+                      const ligneExp=st?.lignes[i]?.exported;
+                      return (
+                        <div key={i} style={{fontSize:12,marginBottom:3,padding:"4px 8px",borderRadius:6,
+                          background:ligneExp?"rgba(109,191,126,0.06)":"rgba(255,255,255,0.02)",
+                          border:`1px solid ${ligneExp?"rgba(109,191,126,0.2)":"transparent"}`}}>
+                          <span style={{color:ligneExp?"#6dbf7e":"#D4A853",fontWeight:700}}>
+                            {ligneExp?"✓ ":""}{l.produit}
+                          </span>
+                          <span style={{color:"#8a7a68"}}>{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}</span>
+                          {l.epaisseur&&<span style={{color:"#5a4a3a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite} u.</span>}
+                        </div>
+                      );
+                    })}
                   </div>
-                  {cmd.notes&&<div style={{fontSize:12,color:"#8a7a68",marginBottom:8,fontStyle:"italic"}}>"{cmd.notes}"</div>}
 
-                  {/* Bouton ouvrir/fermer formulaire cubage */}
-                  {!st?.exported&&(
-                    <button style={{...S.btnSmall,width:"100%",textAlign:"center",
-                      background:isOpen?"rgba(91,184,212,0.12)":"rgba(212,168,83,0.06)",
-                      color:isOpen?"#5bb8d4":"#D4A853",
-                      borderColor:isOpen?"rgba(91,184,212,0.3)":"rgba(212,168,83,0.2)"}}
-                      onClick={()=>{
-                        if(!isOpen){ initRealiser(cmd); setExpand(cmd.id); }
-                        else setExpand(null);
-                      }}>
-                      {isOpen?"▲ Fermer le cubage":"📐 Cuber cette commande"}
-                    </button>
-                  )}
-                  {st?.exported&&(
-                    <div style={{textAlign:"center",padding:"8px",color:"#6dbf7e",fontSize:13,
-                      border:"1px solid rgba(109,191,126,0.2)",borderRadius:8}}>
-                      ✓ Validée et exportée
-                    </div>
-                  )}
+                  {/* Bouton ouvrir cubage */}
+                  <button style={{...S.btnSmall,width:"100%",textAlign:"center",
+                    background:isOpen?"rgba(91,184,212,0.12)":"rgba(212,168,83,0.06)",
+                    color:isOpen?"#5bb8d4":"#D4A853",
+                    borderColor:isOpen?"rgba(91,184,212,0.3)":"rgba(212,168,83,0.2)"}}
+                    onClick={()=>{
+                      if(!isOpen){ initRealiser(cmd); setExpand(cmd.id); }
+                      else setExpand(null);
+                    }}>
+                    {isOpen?"▲ Fermer":"📐 Cuber les produits"}
+                  </button>
 
-                  {/* ── FORMULAIRE CUBAGE COMMANDE ── */}
+                  {/* ── FORMULAIRE CUBAGE PAR PRODUIT ── */}
                   {isOpen&&st&&(
                     <div style={{marginTop:14,borderTop:"1px solid rgba(91,184,212,0.15)",paddingTop:14}}>
-                      {/* Volume grume global */}
-                      <div style={{background:"rgba(91,184,212,0.04)",border:"1px solid rgba(91,184,212,0.15)",
-                        borderRadius:8,padding:"10px 12px",marginBottom:14}}>
-                        <Field label="Volume de la grume sciée (m³) — pour le rendement global">
-                          <Num value={st.volumeGrume} onChange={e=>setVolumeGrume(cmd.id,e.target.value)} ph="Ex: 2.5" step="0.01"/>
-                        </Field>
-                        {rend!==null&&(
-                          <div style={{marginTop:8,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-                            <div style={{textAlign:"center"}}>
-                              <div style={{fontSize:11,color:"#6a5a4a",textTransform:"uppercase",marginBottom:2}}>Vol. total</div>
-                              <div style={{fontSize:15,fontWeight:700,color:"#D4A853"}}>{m3f(volTotal)}</div>
-                            </div>
-                            <div style={{textAlign:"center"}}>
-                              <div style={{fontSize:11,color:"#6a5a4a",textTransform:"uppercase",marginBottom:2}}>Rendement</div>
-                              <div style={{fontSize:15,fontWeight:700,color:"#6dbf7e"}}>{pct(rend)}</div>
-                            </div>
-                            <div style={{textAlign:"center"}}>
-                              <div style={{fontSize:11,color:"#6a5a4a",textTransform:"uppercase",marginBottom:2}}>Perte</div>
-                              <div style={{fontSize:15,fontWeight:700,color:"#e07a5f"}}>{pct(1-rend)}</div>
-                            </div>
-                          </div>
-                        )}
-                        {rend!==null&&(
-                          <div style={{...S.rendBar,marginTop:8}}>
-                            <div style={{...S.rendFill,width:pct(rend)}}/>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Une section par produit */}
                       {st.lignes.map((l,idx)=>{
-                        const ep=parseFloat(l.epaisseur)/1000, la2=parseFloat(l.largeur)/1000,
-                              lo=parseFloat(l.longueur), nb=parseFloat(l.nbUnites);
-                        const vc=(ep&&la2&&lo&&nb)?round(ep*la2*lo*nb,4):null;
+                        const pret=lignePrete(l);
                         return (
-                          <div key={idx} style={{background:"rgba(255,255,255,0.02)",
-                            border:"1px solid rgba(212,168,83,0.1)",borderRadius:8,
-                            padding:"10px 12px",marginBottom:10}}>
-                            <div style={{fontSize:11,color:"#D4A853",fontWeight:700,
-                              textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>
-                              Produit {idx+1} — {l.produit} · {l.essence}
-                              {l.qualite&&<span style={{color:"#6a5a4a"}}> · {l.qualite}</span>}
+                          <div key={idx} style={{
+                            background: l.exported?"rgba(109,191,126,0.04)":"rgba(255,255,255,0.02)",
+                            border:`1px solid ${l.exported?"rgba(109,191,126,0.3)":"rgba(212,168,83,0.15)"}`,
+                            borderRadius:10,padding:"12px",marginBottom:12}}>
+
+                            {/* Titre produit */}
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                              <div style={{fontSize:12,fontWeight:700,color:l.exported?"#6dbf7e":"#D4A853",
+                                textTransform:"uppercase",letterSpacing:"0.07em"}}>
+                                {l.exported?"✓ ":""}{l.produit} · {l.essence}
+                                {l.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {l.qualite}</span>}
+                              </div>
                             </div>
-                            <Row3>
-                              <Field label="Ép. mm">
-                                <Num value={l.epaisseur} onChange={e=>setLigneField(cmd.id,idx,"epaisseur",e.target.value)} ph="27"/>
-                              </Field>
-                              <Field label="Larg. mm">
-                                <Num value={l.largeur} onChange={e=>setLigneField(cmd.id,idx,"largeur",e.target.value)} ph="120"/>
-                              </Field>
-                              <Field label="Long. m">
-                                <Num value={l.longueur} onChange={e=>setLigneField(cmd.id,idx,"longueur",e.target.value)} ph="2.4" step="0.1"/>
-                              </Field>
-                            </Row3>
-                            <Field label="Nb unités produites" style={{marginTop:10}}>
-                              <Num value={l.nbUnites} onChange={e=>setLigneField(cmd.id,idx,"nbUnites",e.target.value)} ph={l.quantite||"200"} step="1"/>
-                            </Field>
-                            {vc!==null&&(
-                              <div style={{marginTop:8,display:"flex",gap:12,
-                                background:"rgba(212,168,83,0.04)",borderRadius:6,padding:"8px 10px"}}>
-                                <div>
-                                  <div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase"}}>Vol. unitaire</div>
-                                  <div style={{fontSize:13,fontWeight:600,color:"#e8ddd0"}}>{m3f(ep*la2*lo)}</div>
-                                </div>
-                                <div>
+
+                            {l.exported?(
+                              /* Résumé si déjà exporté */
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                                <div style={{textAlign:"center"}}>
                                   <div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase"}}>Vol. charge</div>
-                                  <div style={{fontSize:14,fontWeight:700,color:"#D4A853"}}>{m3f(vc)}</div>
+                                  <div style={{fontSize:13,fontWeight:700,color:"#D4A853"}}>{m3f(l.volCharge||0)}</div>
+                                </div>
+                                <div style={{textAlign:"center"}}>
+                                  <div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase"}}>Rendement</div>
+                                  <div style={{fontSize:13,fontWeight:700,color:"#6dbf7e"}}>{l.rend!=null?pct(l.rend):"—"}</div>
+                                </div>
+                                <div style={{textAlign:"center"}}>
+                                  <div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase"}}>Perte</div>
+                                  <div style={{fontSize:13,fontWeight:700,color:"#e07a5f"}}>{l.perte!=null?pct(l.perte):"—"}</div>
                                 </div>
                               </div>
+                            ):(
+                              <>
+                                {/* Dimensions */}
+                                <Row3>
+                                  <Field label="Ép. mm">
+                                    <Num value={l.epaisseur} onChange={e=>setLigneVal(cmd.id,idx,"epaisseur",e.target.value)} ph="27"/>
+                                  </Field>
+                                  <Field label="Larg. mm">
+                                    <Num value={l.largeur} onChange={e=>setLigneVal(cmd.id,idx,"largeur",e.target.value)} ph="120"/>
+                                  </Field>
+                                  <Field label="Long. m">
+                                    <Num value={l.longueur} onChange={e=>setLigneVal(cmd.id,idx,"longueur",e.target.value)} ph="2.4" step="0.1"/>
+                                  </Field>
+                                </Row3>
+
+                                {/* Nb unités + Vol grume — propre à CE produit */}
+                                <Row2 style={{marginTop:10}}>
+                                  <Field label="Nb unités prod.">
+                                    <Num value={l.nbUnites} onChange={e=>setLigneVal(cmd.id,idx,"nbUnites",e.target.value)} ph={l.quantite||"200"} step="1"/>
+                                  </Field>
+                                  <Field label="Vol. grume (m³)">
+                                    <Num value={l.volumeGrume} onChange={e=>setLigneVal(cmd.id,idx,"volumeGrume",e.target.value)} ph="2.5" step="0.01"/>
+                                  </Field>
+                                </Row2>
+
+                                {/* Résultats temps réel */}
+                                {l.volCharge!=null&&(
+                                  <div style={{marginTop:10,background:"rgba(212,168,83,0.04)",
+                                    borderRadius:8,padding:"8px 10px",display:"grid",
+                                    gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                                    <div style={{textAlign:"center"}}>
+                                      <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Vol. unit.</div>
+                                      <div style={{fontSize:12,fontWeight:600,color:"#e8ddd0"}}>{m3f(l.volUnit)}</div>
+                                    </div>
+                                    <div style={{textAlign:"center"}}>
+                                      <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Vol. charge</div>
+                                      <div style={{fontSize:13,fontWeight:700,color:"#D4A853"}}>{m3f(l.volCharge)}</div>
+                                    </div>
+                                    <div style={{textAlign:"center"}}>
+                                      <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Rendement</div>
+                                      <div style={{fontSize:12,fontWeight:700,color:"#6dbf7e"}}>{l.rend!=null?pct(l.rend):"—"}</div>
+                                    </div>
+                                    <div style={{textAlign:"center"}}>
+                                      <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Perte</div>
+                                      <div style={{fontSize:12,fontWeight:700,color:"#e07a5f"}}>{l.perte!=null?pct(l.perte):"—"}</div>
+                                    </div>
+                                  </div>
+                                )}
+                                {l.volCharge!=null&&l.rend!=null&&(
+                                  <div style={{...S.rendBar,marginTop:6}}>
+                                    <div style={{...S.rendFill,width:pct(l.rend)}}/>
+                                  </div>
+                                )}
+
+                                {/* Bouton valider CE produit */}
+                                <button
+                                  style={{...S.btnBig,...(!pret||l.exporting?S.btnDis:{}),
+                                    marginTop:10,marginBottom:0,fontSize:13,padding:"11px",
+                                    background:pret?"linear-gradient(135deg,#0a1f0a,#6dbf7e)":"rgba(255,255,255,0.05)",
+                                    color:pret?"#fff":"#4a3a2a",
+                                    boxShadow:pret?"0 4px 12px rgba(109,191,126,0.2)":"none"}}
+                                  onClick={()=>validerLigne(cmd,idx)}
+                                  disabled={!pret||l.exporting}>
+                                  {l.exporting?<Spinner/>:`✓ Valider produit ${idx+1}`}
+                                </button>
+                              </>
                             )}
                           </div>
                         );
                       })}
-
-                      {/* Bouton valider commande */}
-                      <button style={{...S.btnBig,...(!pret?S.btnDis:{}),
-                        background:"linear-gradient(135deg,#0a1f0a,#6dbf7e)",color:"#fff",marginTop:6}}
-                        onClick={()=>validerCommande(cmd)} disabled={!pret||st.exporting}>
-                        {st.exporting?<Spinner/>:`✓ Valider et exporter ${cmd.id}`}
-                      </button>
-                      {!pret&&<div style={{textAlign:"center",fontSize:11,color:"#6a5a4a",marginTop:4}}>
-                        Remplis toutes les dimensions et quantités + volume grume pour valider
-                      </div>}
                     </div>
                   )}
                 </div>
               );
             })}
 
-            {/* Commandes validées (repliées) */}
+            {/* Commandes validées (condensées) */}
             {cmdValidees.length>0&&<>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",
                 color:"#6dbf7e",marginTop:20,marginBottom:8,paddingBottom:5,
-                borderBottom:"1px solid rgba(109,191,126,0.2)"}}>Validées</div>
+                borderBottom:"1px solid rgba(109,191,126,0.2)"}}>Validées récentes</div>
               {cmdValidees.map(cmd=>(
                 <div key={cmd.id} style={{...S.card,borderColor:"rgba(109,191,126,0.15)",opacity:0.7}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -714,6 +707,75 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
                 </div>
               ))}
             </>}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════
+            ONGLET HISTORIQUE COMMANDES
+        ══════════════════════════════════════════ */}
+        {tab==="historique"&&(
+          <div style={S.page}>
+            {historiqueCmds.length===0?<Empty icon="📚" text="Aucune commande validée pour l'instant"/>:(
+              <>
+                <div style={{color:"#8a7a68",fontSize:12,marginBottom:14}}>
+                  {historiqueCmds.length} commande{historiqueCmds.length>1?"s":""} réalisée{historiqueCmds.length>1?"s":""}
+                </div>
+                {historiqueCmds.map(h=>(
+                  <div key={h.id} style={{...S.card,borderColor:"rgba(109,191,126,0.2)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div>
+                        <div style={{fontSize:11,color:"#5bb8d4",letterSpacing:"0.08em"}}>{h.id}</div>
+                        <div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{h.client}</div>
+                      </div>
+                      <span style={{fontSize:11,color:"#6dbf7e",background:"rgba(109,191,126,0.1)",
+                        padding:"3px 8px",borderRadius:12,border:"1px solid rgba(109,191,126,0.2)"}}>✓ Réalisée</span>
+                    </div>
+                    <div style={{fontSize:12,color:"#6a5a4a",marginBottom:8}}>
+                      📅 Livraison : <strong style={{color:"#c4b09a"}}>{h.dateLivraison}</strong>
+                      {h.dateValidation&&<span> · Validée le {h.dateValidation}</span>}
+                    </div>
+                    {/* Détail par produit */}
+                    {(h.lignes||[]).map((l,i)=>(
+                      <div key={i} style={{background:"rgba(109,191,126,0.03)",
+                        border:"1px solid rgba(109,191,126,0.1)",borderRadius:7,
+                        padding:"8px 10px",marginBottom:6}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"#D4A853",marginBottom:4}}>
+                          {l.produit} · {l.essence}
+                          {l.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {l.qualite}</span>}
+                        </div>
+                        <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:6}}>
+                          {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.nbUnites} u.
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Grume</div>
+                            <div style={{fontSize:11,fontWeight:600,color:"#a09080"}}>{m3f(l.volumeGrume||0)}</div>
+                          </div>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Vol.</div>
+                            <div style={{fontSize:11,fontWeight:700,color:"#D4A853"}}>{m3f(l.volCharge||0)}</div>
+                          </div>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Rend.</div>
+                            <div style={{fontSize:11,fontWeight:700,color:"#6dbf7e"}}>{l.rend!=null?pct(l.rend):"—"}</div>
+                          </div>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase"}}>Perte</div>
+                            <div style={{fontSize:11,fontWeight:700,color:"#e07a5f"}}>{l.perte!=null?pct(l.perte):"—"}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {/* Vol total commande */}
+                    {h.lignes&&h.lignes.length>1&&(
+                      <div style={{textAlign:"right",fontSize:12,color:"#D4A853",marginTop:4,fontWeight:700}}>
+                        Total : {m3f(h.lignes.reduce((s,l)=>s+(l.volCharge||0),0))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
 
@@ -745,22 +807,20 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
                 <Field label="Vol. grume (m³)"><Num value={cubeForm.volumeGrume} onChange={setC("volumeGrume")} ph="2.5" step="0.01"/></Field>
               </Row2>
             </Card>
-            {calcul(cubeForm)?(()=>{const r=calcul(cubeForm); return (
+            {cubeRes?(
               <div style={S.resultBox}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-                  <RItem label="Vol. unitaire" value={m3f(r.volumeUnit)}/>
-                  <RItem label="Vol. charge"   value={m3f(r.volumeCharge)} big/>
-                  <RItem label="Rendement"     value={pct(r.rendement)} color="#6dbf7e"/>
-                  <RItem label="Perte"         value={pct(r.perte)} color="#e07a5f"/>
+                  <RItem label="Vol. unitaire" value={m3f(cubeRes.volumeUnit)}/>
+                  <RItem label="Vol. charge"   value={m3f(cubeRes.volumeCharge)} big/>
+                  <RItem label="Rendement"     value={pct(cubeRes.rendement)} color="#6dbf7e"/>
+                  <RItem label="Perte"         value={pct(cubeRes.perte)} color="#e07a5f"/>
                 </div>
-                <div style={S.rendBar}><div style={{...S.rendFill,width:pct(r.rendement)}}/></div>
+                <div style={S.rendBar}><div style={{...S.rendFill,width:pct(cubeRes.rendement)}}/></div>
               </div>
-            );})():<div style={S.hint}>Remplis les champs pour calculer</div>}
+            ):<div style={S.hint}>Remplis les champs pour calculer</div>}
             <button style={{...S.btnBig,...(!cubeValid?S.btnDis:{})}} onClick={addCube} disabled={!cubeValid}>
               Cuber et sauvegarder
             </button>
-
-            {/* Historique cubage libre */}
             {history.length>0&&<>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",
                 color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,
@@ -803,6 +863,9 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
         {tab==="config"&&(
           <div style={S.page}>
             <Card title="Apps Script Web App">
+              <p style={{fontSize:13,color:"#a09080",lineHeight:1.7,marginBottom:14}}>
+                Colle l'URL de ton Apps Script déployée.
+              </p>
               <Field label="URL Apps Script">
                 <Inp value={scriptUrl}
                   onChange={e=>{ setScriptUrl(e.target.value); localStorage.setItem(APPS_SCRIPT_URL_KEY,e.target.value); }}
@@ -817,31 +880,25 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   var ss = SpreadsheetApp.openById("${SHEET_ID}");
   if(action === "getCommandes") {
     var sheet = ss.getSheetByName("Vendeur");
-    if(!sheet || sheet.getLastRow()<2) return json({commandes:[]});
+    if(!sheet||sheet.getLastRow()<2) return json({commandes:[]});
     var rows = sheet.getDataRange().getValues();
     var headers = rows[0];
-    var map = {}, order = [];
+    var map={}, order=[];
     rows.slice(1).forEach(function(r){
       var obj={};
       headers.forEach(function(h,i){ obj[h]=r[i]; });
-      var id = String(obj["id"]||"").trim();
-      if(id) {
-        map[id]={id,client:obj["client"],
-          dateLivraison:obj["dateLivraison"],
-          notes:obj["notes"],
-          statut:obj["statut"]||"attente",
-          dateCreation:obj["dateCreation"],lignes:[]};
-        order.push(id);
-      }
-      var cmdId = id || order[order.length-1];
-      if(cmdId && map[cmdId]) {
-        map[cmdId].lignes.push({
-          produit:obj["produit"],essence:obj["essence"],
-          qualite:obj["qualite"],epaisseur:obj["epaisseur"],
-          largeur:obj["largeur"],longueur:obj["longueur"],
-          quantite:obj["quantite"]
-        });
-      }
+      var id=String(obj["id"]||"").trim();
+      if(id){ map[id]={id,client:obj["client"],
+        dateLivraison:obj["dateLivraison"],notes:obj["notes"],
+        statut:obj["statut"]||"attente",
+        dateCreation:obj["dateCreation"],lignes:[]};
+        order.push(id); }
+      var cmdId=id||order[order.length-1];
+      if(cmdId&&map[cmdId]) map[cmdId].lignes.push({
+        produit:obj["produit"],essence:obj["essence"],
+        qualite:obj["qualite"],epaisseur:obj["epaisseur"],
+        largeur:obj["largeur"],longueur:obj["longueur"],
+        quantite:obj["quantite"]});
     });
     return json({commandes:order.map(function(id){return map[id];})});
   }
@@ -849,63 +906,58 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
 }
 
 function doPost(e) {
-  var data = JSON.parse(e.postData.contents);
-  var ss = SpreadsheetApp.openById("${SHEET_ID}");
+  var data=JSON.parse(e.postData.contents);
+  var ss=SpreadsheetApp.openById("${SHEET_ID}");
 
-  if(data.type === "commande") {
-    var sheet = ss.getSheetByName("Vendeur")||ss.insertSheet("Vendeur");
-    if(sheet.getLastRow()===0)
-      sheet.appendRow(["id","client","produit","essence","qualite",
+  if(data.type==="commande"){
+    var s=ss.getSheetByName("Vendeur")||ss.insertSheet("Vendeur");
+    if(s.getLastRow()===0)
+      s.appendRow(["id","client","produit","essence","qualite",
         "epaisseur","largeur","longueur","quantite",
         "dateLivraison","notes","statut","dateCreation"]);
-    var ids=sheet.getRange(2,1,Math.max(sheet.getLastRow()-1,1),1).getValues().flat().map(String);
-    if(ids.indexOf(data.id)===-1)
-      data.rows.forEach(function(row){sheet.appendRow(row);});
+    var ids=s.getLastRow()>1?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];
+    if(ids.indexOf(String(data.id))===-1)
+      data.rows.forEach(function(row){s.appendRow(row);});
   }
 
-  if(data.type === "updateStatut") {
-    var sheet = ss.getSheetByName("Vendeur");
-    if(sheet) {
-      var vals=sheet.getRange(2,1,Math.max(sheet.getLastRow()-1,1),1).getValues();
+  if(data.type==="updateStatut"){
+    var s=ss.getSheetByName("Vendeur");
+    if(s&&s.getLastRow()>1){
+      var vals=s.getRange(2,1,s.getLastRow()-1,1).getValues();
       for(var i=0;i<vals.length;i++){
         if(String(vals[i][0]).trim()===String(data.id).trim()){
-          sheet.getRange(i+2,12).setValue(data.statut); break;
+          s.getRange(i+2,12).setValue(data.statut); break;
         }
       }
     }
   }
 
-  if(data.type === "deleteCommande") {
-    var sheet = ss.getSheetByName("Vendeur");
-    if(sheet && sheet.getLastRow()>1) {
-      var vals=sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues();
-      for(var i=vals.length-1;i>=0;i--){
-        if(String(vals[i][0]).trim()===String(data.id).trim())
-          sheet.deleteRow(i+2);
+  if(data.type==="deleteCommande"){
+    var s=ss.getSheetByName("Vendeur");
+    if(s&&s.getLastRow()>1){
+      // Trouver la ligne du CMD ID et toutes les lignes produits après
+      var allVals=s.getRange(2,1,s.getLastRow()-1,1).getValues();
+      var startRow=-1, endRow=-1;
+      for(var i=0;i<allVals.length;i++){
+        var cellId=String(allVals[i][0]).trim();
+        if(cellId===String(data.id).trim()){startRow=i+2;endRow=i+2;}
+        else if(startRow>0&&cellId===""){endRow=i+2;}
+        else if(startRow>0&&cellId!==""){break;}
       }
-      // Supprimer aussi les lignes produits suivantes (id vide liées à cette cmd)
-      // Déjà géré par la boucle ci-dessus pour les lignes sans id
+      if(startRow>0){
+        // Supprimer de bas en haut pour ne pas décaler les indices
+        for(var r=endRow;r>=startRow;r--) s.deleteRow(r);
+      }
     }
   }
 
-  if(data.type === "cubage" || data.type === "cubageCommande") {
-    var sheet = ss.getSheetByName("Scieur")||ss.insertSheet("Scieur");
-    if(sheet.getLastRow()===0)
-      sheet.appendRow(["Date","Cmd ID","Produit","Essence","Qualité",
+  if(data.type==="cubage"){
+    var s=ss.getSheetByName("Scieur")||ss.insertSheet("Scieur");
+    if(s.getLastRow()===0)
+      s.appendRow(["Date","Cmd ID","Produit","Essence","Qualité",
         "Ép.mm","Larg.mm","Long.m","Nb unités","Vol.Grume m³",
         "Vol.Unitaire m³","Vol.Charge m³","Rendement","Perte"]);
-    if(data.type==="cubage"){
-      // Anti-doublon par id interne
-      var col2=sheet.getRange(2,2,Math.max(sheet.getLastRow()-1,1),1).getValues().flat().map(String);
-      if(col2.indexOf(String(data.id))===-1) sheet.appendRow(data.row);
-    } else {
-      // cubageCommande : anti-doublon sur cmdId, on supprime l'ancienne si elle existe
-      var col2=sheet.getRange(2,2,Math.max(sheet.getLastRow()-1,1),1).getValues().flat().map(String);
-      var alreadyRows=[];
-      col2.forEach(function(v,i){if(v===String(data.cmdId))alreadyRows.push(i+2);});
-      for(var i=alreadyRows.length-1;i>=0;i--) sheet.deleteRow(alreadyRows[i]);
-      data.rows.forEach(function(row){sheet.appendRow(row);});
-    }
+    s.appendRow(data.row);
   }
 
   return ContentService.createTextOutput(JSON.stringify({ok:true}))
@@ -916,22 +968,26 @@ function json(obj){
     .setMimeType(ContentService.MimeType.JSON);
 }`}</pre>
             </Card>
+
             <div style={{background:"#1a1510",border:"1px solid rgba(212,168,83,0.1)",
               borderRadius:8,padding:14,fontSize:12,color:"#8a7a68",lineHeight:1.9}}>
-              <strong style={{color:"#D4A853",display:"block",marginBottom:6}}>⚠ Mettre à jour Apps Script</strong>
-              Extensions → Apps Script → remplace tout → redéploie (nouveau déploiement).<br/>
-              <strong style={{color:"#D4A853",display:"block",margin:"10px 0 4px"}}>Nouveautés script :</strong>
-              • <code>deleteCommande</code> : supprime toutes les lignes de la commande dans Vendeur<br/>
-              • <code>cubageCommande</code> : exporte toutes les lignes produits + remplace si re-soumis<br/>
-              • <code>updateStatut</code> : corrigé pour marquer toutes les lignes d'une commande
+              <strong style={{color:"#e07a5f",display:"block",marginBottom:6}}>⚠ Mettre à jour Apps Script obligatoire</strong>
+              La suppression Sheet nécessite ce nouveau script.<br/>
+              Extensions → Apps Script → remplace tout → <strong style={{color:"#D4A853"}}>Nouveau déploiement</strong> (pas "mettre à jour") → Application Web → Accès : Tout le monde → Déployer → copier l'URL.<br/>
+              <strong style={{color:"#D4A853",display:"block",margin:"8px 0 4px"}}>Nouveautés :</strong>
+              • Suppression correcte multi-lignes dans Vendeur<br/>
+              • Cubage : une ligne par produit, pas d'anti-doublon (chaque validation est unique)<br/>
+              • Historique commandes conservé localement sur cet appareil
             </div>
           </div>
         )}
+
       </main>
 
       <nav style={S.nav}>
         {[
           ["arealiser","🪚",`À réaliser${cmdARealiser.length?` (${cmdARealiser.length})`:""}`],
+          ["historique","📚","Historique"],
           ["cubage","📐","Cubage libre"],
           ["config","⚙","Config"],
         ].map(([k,ic,lb])=>(
@@ -949,12 +1005,6 @@ function RItem({label,value,big,color}){
   return <div>
     <div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{label}</div>
     <div style={{fontSize:big?18:14,fontWeight:big?700:600,color:color||"#e8ddd0",fontVariantNumeric:"tabular-nums"}}>{value}</div>
-  </div>;
-}
-function RRow({label,value,big,color}){
-  return <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
-    <span style={{fontSize:12,color:"#6a5a4a",textTransform:"uppercase",letterSpacing:"0.06em"}}>{label}</span>
-    <span style={{fontSize:big?16:13,fontWeight:big?700:400,color:color||"#c4b09a"}}>{value}</span>
   </div>;
 }
 
