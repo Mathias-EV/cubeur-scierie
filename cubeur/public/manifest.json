@@ -1,0 +1,17 @@
+{
+  "short_name": "Cubeur",
+  "name": "Cubeur Scierie",
+  "description": "Calculateur de volume scierie mobile",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#141210",
+  "background_color": "#141210",
+  "orientation": "portrait"
+}
