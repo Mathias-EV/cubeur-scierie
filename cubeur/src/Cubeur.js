@@ -307,15 +307,8 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   // ── Valider UN produit ──
   const validerProduit=async(cmd, pid)=>{
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
-    // Lire l'état frais via getter fonctionnel pour éviter la closure stale
-    let currentP=null;
-    setCubeState(prev=>{ currentP=prev[cmd.id]?.[pid]; return prev; });
-    // Forcer un tick pour que currentP soit rempli
-    await new Promise(r=>setTimeout(r,0));
-    // Relire directement depuis le state courant
-    currentP=cube[cmd.id]?.[pid];
-    if(!currentP||!isPret(currentP))return;
-    const p=currentP;
+    const p=cube[cmd.id]?.[pid];
+    if(!p||!isPret(p))return;
 
     // Marquer exporting
     setCubeState(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exporting:true}}}));
@@ -332,40 +325,37 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:pid});
 
-      // Mettre à jour l'état via setter fonctionnel pour avoir l'état FRAIS
-      let tousExportes=false;
-      let snapshotFinal=null;
-      setCubeState(prev=>{
-        const updatedCmd={...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}};
-        tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
-        snapshotFinal=updatedCmd;
-        return {...prev,[cmd.id]:updatedCmd};
-      });
+      // Construire le nouvel état DIRECTEMENT depuis la valeur courante de cube
+      // (on ne passe pas par le setter pour lire tousExportes — plus de race condition)
+      const etatCourant=cube[cmd.id]||{};
+      const updatedCmd={
+        ...etatCourant,
+        [pid]:{...etatCourant[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}
+      };
+      // tousExportes calculé de façon purement synchrone sur l'objet construit
+      const tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
 
-      // Attendre que le state soit posé avant de lire tousExportes
-      await new Promise(r=>setTimeout(r,50));
+      // Appliquer la mise à jour au state React
+      setCubeState(prev=>({...prev,[cmd.id]:updatedCmd}));
 
       if(tousExportes){
-        // updateStatut : envoie l'ID commande, le script met à jour TOUTES les lignes de ce CMD dans Vendeur
         try{await callScript(scriptUrl,{type:"updateStatut",id:cmd.id,statut:"valide",date});}catch(e){}
         setCmd(c=>c.map(x=>x.id===cmd.id?{...x,statut:"valide"}:x));
 
-        if(snapshotFinal){
-          const hEntry={
-            id:cmd.id, client:cmd.client,
-            dateLivraison:cmd.dateLivraison||cmd.datelivraison,
-            dateValidation:date,
-            lignes:Object.values(snapshotFinal).sort((a,b)=>a.idx-b.idx).map(p2=>({
-              produit:p2.produit, essence:p2.essence, qualite:p2.qualite,
-              epaisseur:p2.epaisseur, largeur:p2.largeur, longueur:p2.longueur,
-              nbUnites:p2.nbUnites, volumeGrume:p2.volumeGrume,
-              volUnit:p2.volUnit, volCharge:p2.volCharge, rend:p2.rend, perte:p2.perte
-            }))
-          };
-          const hist=[hEntry,...JSON.parse(localStorage.getItem("historique_cmds")||"[]")];
-          localStorage.setItem("historique_cmds",JSON.stringify(hist));
-          setHistCmds(hist);
-        }
+        const hEntry={
+          id:cmd.id, client:cmd.client,
+          dateLivraison:cmd.dateLivraison||cmd.datelivraison,
+          dateValidation:date,
+          lignes:Object.values(updatedCmd).sort((a,b)=>a.idx-b.idx).map(p2=>({
+            produit:p2.produit, essence:p2.essence, qualite:p2.qualite,
+            epaisseur:p2.epaisseur, largeur:p2.largeur, longueur:p2.longueur,
+            nbUnites:p2.nbUnites, volumeGrume:p2.volumeGrume,
+            volUnit:p2.volUnit, volCharge:p2.volCharge, rend:p2.rend, perte:p2.perte
+          }))
+        };
+        const hist=[hEntry,...JSON.parse(localStorage.getItem("historique_cmds")||"[]")];
+        localStorage.setItem("historique_cmds",JSON.stringify(hist));
+        setHistCmds(hist);
         showToast(`✓ Commande ${cmd.id} entièrement validée !`);
         setExpand(null);
       }else{
