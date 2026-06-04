@@ -307,8 +307,15 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   // ── Valider UN produit ──
   const validerProduit=async(cmd, pid)=>{
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
-    const p=cube[cmd.id]?.[pid];
-    if(!p||!isPret(p))return;
+    // Lire l'état frais via getter fonctionnel pour éviter la closure stale
+    let currentP=null;
+    setCubeState(prev=>{ currentP=prev[cmd.id]?.[pid]; return prev; });
+    // Forcer un tick pour que currentP soit rempli
+    await new Promise(r=>setTimeout(r,0));
+    // Relire directement depuis le state courant
+    currentP=cube[cmd.id]?.[pid];
+    if(!currentP||!isPret(currentP))return;
+    const p=currentP;
 
     // Marquer exporting
     setCubeState(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exporting:true}}}));
@@ -319,43 +326,50 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     const vu=round(ep*la*lo,6), vc=round(vu*nb,4);
     const rend=vg>0?round(vc/vg,4):0, perte=round(1-rend,4);
 
-    // La ligne Sheet : ID produit unique en col 2 pour anti-doublon
     const row=[date, cmd.id, pid, p.produit, p.essence, p.qualite,
                p.epaisseur, p.largeur, p.longueur, nb, vg, vu, vc, rend, perte];
 
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:pid});
 
-      // Calculer le nouvel état après cet export
-      const updatedCube={...cube[cmd.id],[pid]:{...cube[cmd.id][pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}};
-      const tousExportes=Object.values(updatedCube).every(p2=>p2.exported);
+      // Mettre à jour l'état via setter fonctionnel pour avoir l'état FRAIS
+      let tousExportes=false;
+      let snapshotFinal=null;
+      setCubeState(prev=>{
+        const updatedCmd={...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}};
+        tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
+        snapshotFinal=updatedCmd;
+        return {...prev,[cmd.id]:updatedCmd};
+      });
 
-      setCubeState(prev=>({...prev,[cmd.id]:updatedCube}));
+      // Attendre que le state soit posé avant de lire tousExportes
+      await new Promise(r=>setTimeout(r,50));
 
       if(tousExportes){
-        // Toute la commande est réalisée
+        // updateStatut : envoie l'ID commande, le script met à jour TOUTES les lignes de ce CMD dans Vendeur
         try{await callScript(scriptUrl,{type:"updateStatut",id:cmd.id,statut:"valide",date});}catch(e){}
         setCmd(c=>c.map(x=>x.id===cmd.id?{...x,statut:"valide"}:x));
 
-        // Sauvegarder dans historique
-        const hEntry={
-          id:cmd.id, client:cmd.client,
-          dateLivraison:cmd.dateLivraison||cmd.datelivraison,
-          dateValidation:date,
-          lignes:Object.values(updatedCube).map(p2=>({
-            produit:p2.produit, essence:p2.essence, qualite:p2.qualite,
-            epaisseur:p2.epaisseur, largeur:p2.largeur, longueur:p2.longueur,
-            nbUnites:p2.nbUnites, volumeGrume:p2.volumeGrume,
-            volUnit:p2.volUnit, volCharge:p2.volCharge, rend:p2.rend, perte:p2.perte
-          }))
-        };
-        const hist=[hEntry,...JSON.parse(localStorage.getItem("historique_cmds")||"[]")];
-        localStorage.setItem("historique_cmds",JSON.stringify(hist));
-        setHistCmds(hist);
+        if(snapshotFinal){
+          const hEntry={
+            id:cmd.id, client:cmd.client,
+            dateLivraison:cmd.dateLivraison||cmd.datelivraison,
+            dateValidation:date,
+            lignes:Object.values(snapshotFinal).sort((a,b)=>a.idx-b.idx).map(p2=>({
+              produit:p2.produit, essence:p2.essence, qualite:p2.qualite,
+              epaisseur:p2.epaisseur, largeur:p2.largeur, longueur:p2.longueur,
+              nbUnites:p2.nbUnites, volumeGrume:p2.volumeGrume,
+              volUnit:p2.volUnit, volCharge:p2.volCharge, rend:p2.rend, perte:p2.perte
+            }))
+          };
+          const hist=[hEntry,...JSON.parse(localStorage.getItem("historique_cmds")||"[]")];
+          localStorage.setItem("historique_cmds",JSON.stringify(hist));
+          setHistCmds(hist);
+        }
         showToast(`✓ Commande ${cmd.id} entièrement validée !`);
         setExpand(null);
       }else{
-        showToast(`${p.produit} (${pid}) exporté ✓`);
+        showToast(`${p.produit} exporté ✓`);
       }
     }catch(e){
       setCubeState(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exporting:false}}}));
@@ -464,7 +478,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
                   color:isOpen?"#5bb8d4":"#D4A853",
                   borderColor:isOpen?"rgba(91,184,212,.3)":"rgba(212,168,83,.2)"}}
                   onClick={()=>{if(!isOpen){initCubeCmd(cmd);setExpand(cmd.id);}else setExpand(null);}}>
-                  {isOpen?"▲ Fermer":"📐 Cuber les produits"}
+                  {isOpen?"▲ Fermer":"👁 Voir commande"}
                 </button>
 
                 {/* ── FORMULAIRE PAR PRODUIT ── */}
@@ -691,10 +705,21 @@ function doPost(e) {
   if(d.type==="updateStatut"){
     var s=ss.getSheetByName("Vendeur");
     if(s&&s.getLastRow()>1){
-      var v=s.getRange(2,1,s.getLastRow()-1,1).getValues();
+      var lastRow=s.getLastRow();
+      var v=s.getRange(2,1,lastRow-1,13).getValues();
+      var inBlock=false;
       for(var i=0;i<v.length;i++){
-        if(String(v[i][0]).trim()===String(d.id).trim()){
-          s.getRange(i+2,12).setValue(d.statut); break;
+        var cellId=String(v[i][0]).trim();
+        if(cellId===String(d.id).trim()){
+          // Première ligne du bloc : mettre à jour statut (col 12) et date (col 13)
+          s.getRange(i+2,12).setValue(d.statut);
+          inBlock=true;
+        } else if(inBlock&&cellId===""){
+          // Ligne produit suivante sans ID : mettre à jour aussi le statut
+          s.getRange(i+2,12).setValue(d.statut);
+        } else if(inBlock&&cellId!==""){
+          // Nouvelle commande, arrêter
+          break;
         }
       }
     }
