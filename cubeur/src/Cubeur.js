@@ -11,8 +11,9 @@ const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Po
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
 const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
 
-const initCmd  = { client:"",produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",dateLivraison:"",notes:"" };
-const initCube = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"" };
+const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"" };
+const initCmd   = { client:"",dateLivraison:"",notes:"",lignes:[{...initLigne}] };
+const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 function round(n,d=6){ return Math.round(n*10**d)/10**d; }
@@ -27,7 +28,7 @@ function pct(n){ return (n*100).toFixed(1)+" %"; }
 function m3f(n){ return parseFloat(n).toFixed(4)+" m³"; }
 function genId(){ return "CMD-"+Date.now().toString(36).toUpperCase().slice(-6); }
 function today(){ return new Date().toISOString().split("T")[0]; }
-function fmtDate(d){ return new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}); }
+function fmtDate(){ return new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"}); }
 
 // ─── COMPOSANTS UI ────────────────────────────────────────────────────────────
 function Toast({toast}){
@@ -128,28 +129,34 @@ function Login({onLogin}){
 
 // ─── APP VENDEUR ──────────────────────────────────────────────────────────────
 function AppVendeur({scriptUrl,onLogout,showToast}){
-  const [tab,setTab]           = useState("new"); // new | mes-commandes
-  const [form,setForm]         = useState(initCmd);
-  const [mesCommandes,setMes]  = useState([]);
-  const [loading,setLoading]   = useState(false);
-  const [submitting,setSub]    = useState(false);
+  const [tab,setTab]          = useState("new");
+  const [form,setForm]        = useState(initCmd);
+  const [mesCommandes,setMes] = useState([]);
+  const [loading,setLoading]  = useState(false);
+  const [submitting,setSub]   = useState(false);
+  const [confirmDel,setConfirmDel] = useState(null); // id à supprimer
 
-  const set=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
-  const isValid=form.client&&form.produit&&form.essence&&form.dateLivraison&&form.quantite;
+  const setField=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
 
-  // Charger mes commandes depuis le Sheet
-  const loadCommandes=useCallback(async()=>{
-    if(!scriptUrl) return;
-    setLoading(true);
-    try{
-      const r=await fetch(`${scriptUrl}?action=getCommandes`,{method:"GET",mode:"no-cors"});
-      // no-cors ne retourne pas de données lisibles — on utilise le stockage local
-    }catch(e){}
-    // Lire depuis localStorage (commandes créées sur cet appareil)
+  // Gestion lignes produits
+  const setLigne=(idx,field)=>e=>{
+    setForm(p=>{
+      const lignes=[...p.lignes];
+      lignes[idx]={...lignes[idx],[field]:e.target.value};
+      return {...p,lignes};
+    });
+  };
+  const addLigne=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
+  const removeLigne=idx=>setForm(p=>({...p,lignes:p.lignes.filter((_,i)=>i!==idx)}));
+
+  const isValid=form.client&&form.dateLivraison&&form.lignes.length>0&&
+    form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
+
+  // Charger commandes (localStorage)
+  const loadCommandes=useCallback(()=>{
     const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
     setMes(saved);
-    setLoading(false);
-  },[scriptUrl]);
+  },[]);
 
   useEffect(()=>{ loadCommandes(); },[loadCommandes]);
 
@@ -158,15 +165,23 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
     if(!scriptUrl){ showToast("URL Apps Script manquante — contacter le scieur","error"); return; }
     setSub(true);
     const id=genId();
-    const row=[id,form.client,form.produit,form.essence,form.qualite,
-      form.epaisseur,form.largeur,form.longueur,form.quantite,
-      form.dateLivraison,form.notes,"attente",fmtDate()];
+    const dateCreation=fmtDate();
+    // Une ligne Sheet par produit de la commande
+    const rows=form.lignes.map((l,i)=>[
+      i===0?id:"",          // CMD ID seulement sur la 1ère ligne
+      form.client,
+      l.produit,l.essence,l.qualite,
+      l.epaisseur,l.largeur,l.longueur,l.quantite,
+      form.dateLivraison,
+      i===0?form.notes:"",
+      "attente",
+      i===0?dateCreation:""
+    ]);
     try{
       await fetch(scriptUrl,{method:"POST",mode:"no-cors",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({type:"commande",row,id})});
-      // Sauvegarder localement
-      const cmd={...form,id,statut:"attente",dateCreation:fmtDate()};
+        body:JSON.stringify({type:"commande",rows,id})});
+      const cmd={...form,id,statut:"attente",dateCreation};
       const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
       saved.unshift(cmd);
       localStorage.setItem("mes_commandes",JSON.stringify(saved));
@@ -174,8 +189,17 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
       setForm(initCmd);
       setTab("mes-commandes");
       showToast(`Commande ${id} envoyée ✓`);
-    }catch(e){ showToast("Erreur d'envoi — vérifier la connexion","error"); }
+    }catch(e){ showToast("Erreur d'envoi","error"); }
     setSub(false);
+  };
+
+  const supprimerCommande=(id)=>{
+    const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
+    const updated=saved.filter(c=>c.id!==id);
+    localStorage.setItem("mes_commandes",JSON.stringify(updated));
+    setMes(updated);
+    setConfirmDel(null);
+    showToast("Commande supprimée");
   };
 
   const nbAttente=mesCommandes.filter(c=>c.statut==="attente").length;
@@ -190,41 +214,53 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
         <button style={S.btnLogout} onClick={onLogout}>⇤ Déconnexion</button>
       </header>
 
-      <main style={{...S.main}}>
+      <main style={S.main}>
         {tab==="new"&&(
           <div style={S.page}>
-            <Card title="Nouvelle commande">
-              <Field label="Nom du client / chantier">
-                <Inp value={form.client} onChange={set("client")} ph="Ex: Dupont - Chalet Megève"/>
+            <Card title="Informations commande">
+              <Field label="Nom du client / chantier" style={{marginBottom:12}}>
+                <Inp value={form.client} onChange={setField("client")} ph="Ex: Dupont - Chalet Megève"/>
               </Field>
-            </Card>
-
-            <Card title="Produit souhaité">
-              <Row2 style={{marginBottom:12}}>
-                <Field label="Produit"><Sel value={form.produit} onChange={set("produit")} opts={PRODUITS}/></Field>
-                <Field label="Essence"><Sel value={form.essence} onChange={set("essence")} opts={ESSENCES}/></Field>
+              <Row2>
+                <Field label="Date de livraison souhaitée">
+                  <Inp type="date" value={form.dateLivraison} onChange={setField("dateLivraison")} min={today()}/>
+                </Field>
               </Row2>
-              <Field label="Qualité" style={{marginBottom:12}}>
-                <Sel value={form.qualite} onChange={set("qualite")} opts={QUALITES}/>
-              </Field>
-              <Row3>
-                <Field label="Ép. (mm)"><Num value={form.epaisseur} onChange={set("epaisseur")} ph="27"/></Field>
-                <Field label="Larg. (mm)"><Num value={form.largeur} onChange={set("largeur")} ph="120"/></Field>
-                <Field label="Long. (m)"><Num value={form.longueur} onChange={set("longueur")} ph="2.4" step="0.1"/></Field>
-              </Row3>
-              <Field label="Quantité (unités)" style={{marginTop:12}}>
-                <Num value={form.quantite} onChange={set("quantite")} ph="100" step="1"/>
-              </Field>
             </Card>
 
-            <Card title="Livraison">
-              <Field label="Date souhaitée" style={{marginBottom:12}}>
-                <Inp type="date" value={form.dateLivraison} onChange={set("dateLivraison")} min={today()}/>
-              </Field>
-              <Field label="Notes / remarques">
-                <textarea style={{...S.input,minHeight:70,resize:"vertical"}}
-                  value={form.notes} onChange={set("notes")} placeholder="Instructions particulières..."/>
-              </Field>
+            {/* ── LIGNES PRODUITS ── */}
+            {form.lignes.map((lg,idx)=>(
+              <Card key={idx} title={`Produit ${form.lignes.length>1?idx+1:""}`}
+                accent={idx===0?"rgba(212,168,83,0.3)":"rgba(212,168,83,0.12)"}>
+                <Row2 style={{marginBottom:10}}>
+                  <Field label="Produit"><Sel value={lg.produit} onChange={setLigne(idx,"produit")} opts={PRODUITS}/></Field>
+                  <Field label="Essence"><Sel value={lg.essence} onChange={setLigne(idx,"essence")} opts={ESSENCES}/></Field>
+                </Row2>
+                <Field label="Qualité" style={{marginBottom:10}}>
+                  <Sel value={lg.qualite} onChange={setLigne(idx,"qualite")} opts={QUALITES}/>
+                </Field>
+                <Row3>
+                  <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={setLigne(idx,"epaisseur")} ph="27"/></Field>
+                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={setLigne(idx,"largeur")} ph="120"/></Field>
+                  <Field label="Long. m"><Num value={lg.longueur} onChange={setLigne(idx,"longueur")} ph="2.4" step="0.1"/></Field>
+                </Row3>
+                <Field label="Quantité (unités)" style={{marginTop:10}}>
+                  <Num value={lg.quantite} onChange={setLigne(idx,"quantite")} ph="100" step="1"/>
+                </Field>
+                {form.lignes.length>1&&(
+                  <button style={{...S.btnDel,marginTop:10,width:"100%",textAlign:"center"}}
+                    onClick={()=>removeLigne(idx)}>🗑 Supprimer ce produit</button>
+                )}
+              </Card>
+            ))}
+
+            <button style={{...S.btnBig,background:"rgba(212,168,83,0.08)",color:"#D4A853",
+              border:"1px solid rgba(212,168,83,0.3)",marginBottom:10}}
+              onClick={addLigne}>+ Ajouter un produit</button>
+
+            <Card title="Notes">
+              <textarea style={{...S.input,minHeight:60,resize:"vertical"}}
+                value={form.notes} onChange={setField("notes")} placeholder="Instructions particulières..."/>
             </Card>
 
             <button style={{...S.btnBig,...(!isValid||submitting?S.btnDis:{})}}
@@ -244,23 +280,53 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
              mesCommandes.length===0?<Empty icon="📭" text="Aucune commande envoyée"/>:
              mesCommandes.map(c=>(
               <Card key={c.id}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                  <div>
-                    <div style={{fontSize:11,color:"#6a5a4a",letterSpacing:"0.08em"}}>{c.id}</div>
-                    <div style={{fontWeight:700,color:"#e8ddd0",fontSize:15}}>{c.client}</div>
+                {/* Confirmation suppression */}
+                {confirmDel===c.id?(
+                  <div style={{textAlign:"center",padding:"8px 0"}}>
+                    <div style={{color:"#e07a5f",fontSize:13,marginBottom:12}}>
+                      Supprimer la commande <strong>{c.id}</strong> ?<br/>
+                      <span style={{fontSize:11,color:"#6a5a4a"}}>(suppression locale uniquement)</span>
+                    </div>
+                    <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                      <button style={{...S.btnSmall,color:"#e07a5f",borderColor:"rgba(224,122,95,0.4)"}}
+                        onClick={()=>supprimerCommande(c.id)}>Confirmer</button>
+                      <button style={S.btnSmall} onClick={()=>setConfirmDel(null)}>Annuler</button>
+                    </div>
                   </div>
-                  <Badge status={c.statut||"attente"}/>
-                </div>
-                <div style={{fontSize:13,color:"#a09080",marginBottom:4}}>
-                  {c.produit}{c.essence?` · ${c.essence}`:""}{c.qualite?` · ${c.qualite}`:""}
-                </div>
-                {c.epaisseur&&<div style={{fontSize:12,color:"#6a5a4a",fontFamily:"monospace",marginBottom:4}}>
-                  {c.epaisseur}×{c.largeur}mm · {c.longueur}m · {c.quantite} u.
-                </div>}
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6a5a4a"}}>
-                  <span>Livraison : <strong style={{color:"#c4b09a"}}>{c.dateLivraison}</strong></span>
-                  <span>{c.dateCreation}</span>
-                </div>
+                ):(
+                  <>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                      <div>
+                        <div style={{fontSize:11,color:"#6a5a4a",letterSpacing:"0.08em"}}>{c.id}</div>
+                        <div style={{fontWeight:700,color:"#e8ddd0",fontSize:15}}>{c.client}</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <Badge status={c.statut||"attente"}/>
+                        <button style={{...S.btnDel,padding:"4px 8px",fontSize:12}}
+                          onClick={()=>setConfirmDel(c.id)}>🗑</button>
+                      </div>
+                    </div>
+                    {/* Lignes produits */}
+                    {c.lignes&&c.lignes.length>0?(
+                      <div style={{marginBottom:8}}>
+                        {c.lignes.map((l,i)=>(
+                          <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
+                            • {l.produit}{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
+                            {l.epaisseur?<span style={{color:"#6a5a4a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite} u.</span>:null}
+                          </div>
+                        ))}
+                      </div>
+                    ):(
+                      <div style={{fontSize:13,color:"#a09080",marginBottom:4}}>
+                        {c.produit}{c.essence?` · ${c.essence}`:""}{c.qualite?` · ${c.qualite}`:""}
+                      </div>
+                    )}
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6a5a4a"}}>
+                      <span>Livraison : <strong style={{color:"#c4b09a"}}>{c.dateLivraison}</strong></span>
+                      <span>{c.dateCreation}</span>
+                    </div>
+                  </>
+                )}
               </Card>
              ))
             }
@@ -287,7 +353,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   const [loading,setLoading]  = useState(false);
   const [selected,setSelected]= useState(null);
   const [cubeForm,setCube]    = useState(initCube);
-  const [cubeView,setCubeView]= useState("form"); // form | result
+  const [cubeView,setCubeView]= useState("form");
   const [cubeResult,setCubeRes]= useState(null);
   const [history,setHistory]  = useState(()=>JSON.parse(localStorage.getItem("cube_history")||"[]"));
   const [exporting,setExp]    = useState({});
@@ -299,18 +365,17 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     localStorage.setItem("exported_ids",JSON.stringify([...exportedIds]));
   };
 
-  // Charger commandes depuis Sheet via Apps Script
+  // ── Charger commandes depuis le Sheet Vendeur ──
   const loadCommandes=useCallback(async(silent=false)=>{
-    if(!scriptUrl){ return; }
+    if(!scriptUrl) return;
     if(!silent) setLoading(true);
     try{
-      // GET request pour lire le sheet
       const url=`${scriptUrl}?action=getCommandes&t=${Date.now()}`;
       const r=await fetch(url);
       const data=await r.json();
       if(data.commandes) setCmd(data.commandes);
     }catch(e){
-      // Si CORS bloque, on utilise les données locales comme fallback
+      // fallback localStorage si CORS
       const local=JSON.parse(localStorage.getItem("all_commandes")||"[]");
       if(local.length) setCmd(local);
     }
@@ -319,12 +384,10 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
 
   useEffect(()=>{
     loadCommandes();
-    // Polling toutes les 30s pour multi-utilisateurs
     pollingRef.current=setInterval(()=>loadCommandes(true),30000);
     return ()=>clearInterval(pollingRef.current);
   },[loadCommandes]);
 
-  // Changer statut commande
   const updateStatut=async(id,statut)=>{
     if(!scriptUrl){ showToast("URL Apps Script manquante","error"); return; }
     try{
@@ -358,9 +421,23 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     if(!scriptUrl){ showToast("URL Apps Script manquante","error"); return; }
     if(exportedIds.has(String(entry.id))){ showToast("Déjà exporté !","warn"); return; }
     setExp(e=>({...e,[entry.id]:true}));
-    const row=[entry.date,entry.cmdId||"",entry.produit,entry.essence,entry.qualite,
-      entry.epaisseur,entry.largeur,entry.longueur,entry.nbUnites,
-      entry.volumeGrume,entry.volumeUnit,entry.volumeCharge,entry.rendement,entry.perte];
+    // Ordre colonnes corrigé : Date | Cmd ID | Produit | Essence | Qualité | Ép.mm | Larg.mm | Long.m | Nb unités | Vol.Grume | Vol.Unitaire | Vol.Charge | Rendement | Perte
+    const row=[
+      entry.date,
+      entry.cmdId||"",
+      entry.produit,
+      entry.essence,
+      entry.qualite,
+      entry.epaisseur,
+      entry.largeur,
+      entry.longueur,
+      entry.nbUnites,
+      entry.volumeGrume,
+      entry.volumeUnit,
+      entry.volumeCharge,
+      entry.rendement,
+      entry.perte
+    ];
     try{
       await fetch(scriptUrl,{method:"POST",mode:"no-cors",
         headers:{"Content-Type":"application/json"},
@@ -372,9 +449,9 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     setExp(e=>({...e,[entry.id]:false}));
   };
 
-  const cmdAttente   =commandes.filter(c=>c.statut==="attente");
-  const cmdProduction=commandes.filter(c=>c.statut==="production");
-  const cmdValidees  =commandes.filter(c=>c.statut==="valide");
+  const cmdAttente   =commandes.filter(c=>c.statut==="attente"||c.statut==="En attente");
+  const cmdProduction=commandes.filter(c=>c.statut==="production"||c.statut==="En production");
+  const cmdValidees  =commandes.filter(c=>c.statut==="valide"||c.statut==="Validée");
 
   return (
     <div style={S.root}>
@@ -400,19 +477,20 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
               <Stat label="Validées"   value={cmdValidees.length}   color="#6dbf7e"/>
             </div>
 
-            <button style={{...S.btnRefresh}} onClick={()=>loadCommandes()}>
-              {loading?"⏳ Chargement...":"↻ Actualiser"}
+            <button style={S.btnRefresh} onClick={()=>loadCommandes()}>
+              {loading?"⏳ Chargement...":"↻ Actualiser depuis le Sheet"}
             </button>
 
-            {loading&&commandes.length===0?<Empty icon="⏳" text="Chargement des commandes..."/>:
-             commandes.length===0?<Empty icon="📭" text="Aucune commande reçue"/>:<>
+            {!scriptUrl&&<div style={{textAlign:"center",padding:"20px",color:"#D4A853",fontSize:13}}>
+              ⚠ Configure l'URL Apps Script dans l'onglet ⚙ Config pour voir les commandes.
+            </div>}
 
+            {loading&&commandes.length===0?<Empty icon="⏳" text="Chargement des commandes..."/>:
+             commandes.length===0&&scriptUrl?<Empty icon="📭" text="Aucune commande reçue"/>:<>
               {cmdAttente.length>0&&<SHead title="En attente" color="#D4A853"/>}
               {cmdAttente.map(c=><ScCmd key={c.id} cmd={c} onStatut={updateStatut} onSelect={()=>{setSelected(c);setTab("cubage");setCubeView("form");}}/>)}
-
               {cmdProduction.length>0&&<SHead title="En production" color="#5bb8d4"/>}
               {cmdProduction.map(c=><ScCmd key={c.id} cmd={c} onStatut={updateStatut} onSelect={()=>{setSelected(c);setTab("cubage");setCubeView("form");}}/>)}
-
               {cmdValidees.length>0&&<SHead title="Validées" color="#6dbf7e"/>}
               {cmdValidees.map(c=><ScCmd key={c.id} cmd={c} onStatut={updateStatut} onSelect={null}/>)}
             </>}
@@ -427,7 +505,11 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
                 borderRadius:10,padding:"10px 14px",marginBottom:14}}>
                 <div style={{fontSize:10,color:"#5bb8d4",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Commande liée</div>
                 <div style={{fontWeight:700,color:"#e8ddd0"}}>{selected.id} — {selected.client}</div>
-                <div style={{fontSize:12,color:"#8a7a68"}}>{selected.produit} · {selected.essence} · {selected.quantite} u.</div>
+                <div style={{fontSize:12,color:"#8a7a68"}}>
+                  {selected.lignes&&selected.lignes.length>1
+                    ?`${selected.lignes.length} produits`
+                    :`${selected.produit||selected.lignes?.[0]?.produit||""} · ${selected.essence||selected.lignes?.[0]?.essence||""}`}
+                </div>
                 <button style={{...S.btnSmall,marginTop:8,color:"#a09080"}} onClick={()=>setSelected(null)}>✕ Détacher</button>
               </div>
             )}
@@ -455,7 +537,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
               </Card>
 
               {cubeRes?(
-                <div style={{...S.resultBox}}>
+                <div style={S.resultBox}>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
                     <RItem label="Vol. unitaire"  value={m3f(cubeRes.volumeUnit)}/>
                     <RItem label="Vol. charge"    value={m3f(cubeRes.volumeCharge)} big/>
@@ -478,11 +560,11 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
                   <div style={{fontWeight:700,color:"#D4A853",fontSize:18,marginTop:8}}>Charge cubée</div>
                 </div>
                 <Card>
-                  <RRow label="Produit"      value={`${cubeResult.produit} · ${cubeResult.essence}`}/>
-                  <RRow label="Vol. unitaire" value={m3f(cubeResult.volumeUnit)}/>
-                  <RRow label="Vol. charge"   value={m3f(cubeResult.volumeCharge)} big/>
-                  <RRow label="Rendement"     value={pct(cubeResult.rendement)} color="#6dbf7e"/>
-                  <RRow label="Perte"         value={pct(cubeResult.perte)} color="#e07a5f"/>
+                  <RRow label="Produit"       value={`${cubeResult.produit} · ${cubeResult.essence}`}/>
+                  <RRow label="Vol. unitaire"  value={m3f(cubeResult.volumeUnit)}/>
+                  <RRow label="Vol. charge"    value={m3f(cubeResult.volumeCharge)} big/>
+                  <RRow label="Rendement"      value={pct(cubeResult.rendement)} color="#6dbf7e"/>
+                  <RRow label="Perte"          value={pct(cubeResult.perte)} color="#e07a5f"/>
                 </Card>
                 <button style={S.btnBig} onClick={()=>exportCube(cubeResult)}>
                   {exportedIds.has(String(cubeResult.id))?"✓ Déjà exporté":"↑ Exporter vers Google Sheets"}
@@ -503,13 +585,12 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
           </div>
         )}
 
-        {/* ── HISTORIQUE CUBAGE ── */}
+        {/* ── HISTORIQUE ── */}
         {tab==="historique"&&(
           <div style={S.page}>
             {history.length===0?<Empty icon="📋" text="Aucun cubage enregistré"/>:<>
               <div style={{color:"#8a7a68",fontSize:12,marginBottom:12}}>
-                {history.length} charge{history.length>1?"s":""} ·{" "}
-                Total : {m3f(history.reduce((s,e)=>s+e.volumeCharge,0))}
+                {history.length} charge{history.length>1?"s":""} · Total : {m3f(history.reduce((s,e)=>s+e.volumeCharge,0))}
               </div>
               {history.map(e=>(
                 <div key={e.id} style={{...S.card,borderColor:exportedIds.has(String(e.id))?"rgba(109,191,126,0.2)":"rgba(212,168,83,0.12)"}}>
@@ -527,9 +608,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
                   <div style={{display:"flex",gap:8}}>
                     {exportedIds.has(String(e.id))?(
                       <div style={{flex:1,textAlign:"center",fontSize:12,color:"#6dbf7e",
-                        padding:"8px",border:"1px solid rgba(109,191,126,0.15)",borderRadius:7}}>
-                        ✓ Exporté
-                      </div>
+                        padding:"8px",border:"1px solid rgba(109,191,126,0.15)",borderRadius:7}}>✓ Exporté</div>
                     ):(
                       <button style={{...S.btnExport,flex:1}} onClick={()=>exportCube(e)} disabled={exporting[e.id]}>
                         {exporting[e.id]?"…":"↑ Google Sheets"}
@@ -560,21 +639,51 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
               {scriptUrl&&<div style={{fontSize:12,color:"#6dbf7e",marginTop:8}}>✓ URL enregistrée</div>}
             </Card>
 
-            <Card title="Script à coller dans Apps Script">
+            <Card title="Script Apps Script (version mise à jour)">
               <pre style={S.pre}>{`function doGet(e) {
   var action = e.parameter.action;
-  var ss = SpreadsheetApp.openById("${SHEET_ID}");
-  
+  var ss = SpreadsheetApp.openById("1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4");
+
   if(action === "getCommandes") {
     var sheet = ss.getSheetByName("Vendeur");
-    if(!sheet) return json([]);
+    if(!sheet || sheet.getLastRow()<2) return json({commandes:[]});
     var rows = sheet.getDataRange().getValues();
     var headers = rows[0];
-    var commandes = rows.slice(1).map(function(r){
+    // Regrouper les lignes par CMD ID
+    var map = {};
+    var order = [];
+    rows.slice(1).forEach(function(r){
       var obj={};
-      headers.forEach(function(h,i){ obj[h.toLowerCase()]=r[i]; });
-      return obj;
+      headers.forEach(function(h,i){ obj[h]=r[i]; });
+      var id = obj["id"] || obj["ID"];
+      if(id) {
+        // Nouvelle commande
+        map[id] = {
+          id: id,
+          client: obj["client"],
+          dateLivraison: obj["dateLivraison"],
+          notes: obj["notes"],
+          statut: obj["statut"] || "attente",
+          dateCreation: obj["dateCreation"],
+          lignes: []
+        };
+        order.push(id);
+      }
+      // Ligne produit (première ligne ou lignes suivantes sans ID)
+      var cmdId = id || order[order.length-1];
+      if(cmdId && map[cmdId]) {
+        map[cmdId].lignes.push({
+          produit: obj["produit"],
+          essence: obj["essence"],
+          qualite: obj["qualite"],
+          epaisseur: obj["epaisseur"],
+          largeur: obj["largeur"],
+          longueur: obj["longueur"],
+          quantite: obj["quantite"]
+        });
+      }
     });
+    var commandes = order.map(function(id){ return map[id]; });
     return json({commandes: commandes});
   }
   return json({ok:true});
@@ -582,8 +691,8 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
 
 function doPost(e) {
   var data = JSON.parse(e.postData.contents);
-  var ss = SpreadsheetApp.openById("${SHEET_ID}");
-  
+  var ss = SpreadsheetApp.openById("1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4");
+
   if(data.type === "commande") {
     var sheet = ss.getSheetByName("Vendeur") || ss.insertSheet("Vendeur");
     if(sheet.getLastRow()===0){
@@ -591,13 +700,13 @@ function doPost(e) {
         "epaisseur","largeur","longueur","quantite",
         "dateLivraison","notes","statut","dateCreation"]);
     }
-    // Anti-doublon : vérifier si l'ID existe déjà
+    // Anti-doublon
     var ids = sheet.getRange(2,1,Math.max(sheet.getLastRow()-1,1),1).getValues().flat();
     if(ids.indexOf(data.id) === -1) {
-      sheet.appendRow(data.row);
+      data.rows.forEach(function(row){ sheet.appendRow(row); });
     }
   }
-  
+
   if(data.type === "updateStatut") {
     var sheet = ss.getSheetByName("Vendeur");
     if(sheet) {
@@ -606,7 +715,7 @@ function doPost(e) {
       if(idx !== -1) sheet.getRange(idx+2, 12).setValue(data.statut);
     }
   }
-  
+
   if(data.type === "cubage") {
     var sheet = ss.getSheetByName("Scieur") || ss.insertSheet("Scieur");
     if(sheet.getLastRow()===0){
@@ -614,29 +723,35 @@ function doPost(e) {
         "Ép.mm","Larg.mm","Long.m","Nb unités","Vol.Grume m³",
         "Vol.Unitaire m³","Vol.Charge m³","Rendement","Perte"]);
     }
-    // Anti-doublon cubage
-    var ids = sheet.getRange(2,1,Math.max(sheet.getLastRow()-1,1),1).getValues().flat();
-    if(ids.indexOf(data.id) === -1) {
-      var row = [data.id].concat(data.row);
-      sheet.appendRow(row);
+    // Anti-doublon (on vérifie col A = Date, pas l'ID interne)
+    var datesCol = sheet.getRange(2,1,Math.max(sheet.getLastRow()-1,1),2).getValues();
+    var alreadyIn = datesCol.some(function(r){ return String(r[1])===String(data.id); });
+    if(!alreadyIn) {
+      sheet.appendRow(data.row);
     }
   }
-  
+
   return ContentService
     .createTextOutput(JSON.stringify({ok:true}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function json(obj){
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }`}</pre>
             </Card>
 
             <div style={{background:"#1a1510",border:"1px solid rgba(212,168,83,0.1)",
               borderRadius:8,padding:14,fontSize:12,color:"#8a7a68",lineHeight:1.9}}>
-              <strong style={{color:"#D4A853",display:"block",marginBottom:6}}>Sheet ID utilisé :</strong>
-              <code style={{color:"#c4b09a",fontSize:11,wordBreak:"break-all"}}>{SHEET_ID}</code>
-              <strong style={{color:"#D4A853",display:"block",margin:"10px 0 6px"}}>Onglets créés automatiquement :</strong>
-              • <strong>Vendeur</strong> — commandes reçues des vendeurs<br/>
-              • <strong>Scieur</strong> — cubages exportés<br/>
-              <strong style={{color:"#D4A853",display:"block",margin:"10px 0 6px"}}>Anti-doublon :</strong>
-              Commandes et cubages : chaque ID est unique dans le Sheet.
+              <strong style={{color:"#D4A853",display:"block",marginBottom:6}}>⚠ Mise à jour Apps Script requise</strong>
+              Remplace l'ancien script par celui ci-dessus dans Extensions → Apps Script → redéploie.<br/>
+              <strong style={{color:"#D4A853",display:"block",margin:"10px 0 6px"}}>Onglets Sheet :</strong>
+              • <strong>Vendeur</strong> — commandes (1 ligne par produit, ID sur 1ère ligne)<br/>
+              • <strong>Scieur</strong> — cubages exportés (colonnes corrigées)<br/>
+              <strong style={{color:"#D4A853",display:"block",margin:"10px 0 6px"}}>Colonnes Scieur :</strong>
+              Date · Cmd ID · Produit · Essence · Qualité · Ép.mm · Larg.mm · Long.m · Nb unités · Vol.Grume · Vol.Unitaire · Vol.Charge · Rendement · Perte
             </div>
           </div>
         )}
@@ -670,12 +785,22 @@ function ScCmd({cmd,onStatut,onSelect}){
         </div>
         <Badge status={cmd.statut||"attente"}/>
       </div>
-      <div style={{fontSize:13,color:"#a09080",marginBottom:4}}>
-        {cmd.produit}{cmd.essence?` · ${cmd.essence}`:""}{cmd.qualite?` · ${cmd.qualite}`:""}
-      </div>
-      {cmd.epaisseur&&<div style={{fontSize:12,color:"#6a5a4a",fontFamily:"monospace",marginBottom:6}}>
-        {cmd.epaisseur}×{cmd.largeur}mm · {cmd.longueur}m · {cmd.quantite} u.
-      </div>}
+      {/* Lignes produits */}
+      {cmd.lignes&&cmd.lignes.length>0?(
+        <div style={{marginBottom:6}}>
+          {cmd.lignes.map((l,i)=>(
+            <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
+              • {l.produit}{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
+              {l.epaisseur?<span style={{color:"#6a5a4a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite} u.</span>:null}
+            </div>
+          ))}
+        </div>
+      ):(
+        <div style={{fontSize:13,color:"#a09080",marginBottom:4}}>
+          {cmd.produit}{cmd.essence?` · ${cmd.essence}`:""}{cmd.qualite?` · ${cmd.qualite}`:""}
+          {cmd.epaisseur&&<span style={{fontSize:12,color:"#6a5a4a",fontFamily:"monospace"}}> — {cmd.epaisseur}×{cmd.largeur}mm · {cmd.longueur}m · {cmd.quantite} u.</span>}
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6a5a4a",marginBottom:10}}>
         <span>Livraison : <strong style={{color:"#c4b09a"}}>{cmd.dateLivraison||cmd.datelivraison}</strong></span>
       </div>
@@ -685,11 +810,11 @@ function ScCmd({cmd,onStatut,onSelect}){
           <button style={{...S.btnSmall,flex:1,background:"rgba(91,184,212,0.08)",color:"#5bb8d4",border:"1px solid rgba(91,184,212,0.25)"}}
             onClick={onSelect}>📐 Cuber</button>
         )}
-        {cmd.statut==="attente"&&(
+        {(cmd.statut==="attente"||cmd.statut==="En attente")&&(
           <button style={{...S.btnSmall,flex:1,background:"rgba(91,184,212,0.06)",color:"#5bb8d4",border:"1px solid rgba(91,184,212,0.2)"}}
             onClick={()=>onStatut(cmd.id,"production")}>🔨 Lancer</button>
         )}
-        {cmd.statut==="production"&&(
+        {(cmd.statut==="production"||cmd.statut==="En production")&&(
           <button style={{...S.btnSmall,flex:1,background:"rgba(109,191,126,0.06)",color:"#6dbf7e",border:"1px solid rgba(109,191,126,0.2)"}}
             onClick={()=>onStatut(cmd.id,"valide")}>✓ Valider</button>
         )}
@@ -716,9 +841,9 @@ function RRow({label,value,big,color}){
 
 // ─── APP ROOT ─────────────────────────────────────────────────────────────────
 export default function App(){
-  const [role,setRole]         = useState(()=>sessionStorage.getItem("role")||null);
+  const [role,setRole]          = useState(()=>sessionStorage.getItem("role")||null);
   const [scriptUrl,setScriptUrl]= useState(()=>localStorage.getItem(APPS_SCRIPT_URL_KEY)||"");
-  const [toast,setToast]       = useState(null);
+  const [toast,setToast]        = useState(null);
 
   const showToast=(msg,type="success")=>{ setToast({msg,type}); setTimeout(()=>setToast(null),3000); };
   const login=(r)=>{ setRole(r); sessionStorage.setItem("role",r); };
@@ -743,13 +868,9 @@ const S={
   bg:{position:"fixed",top:0,left:0,right:0,bottom:0,
     backgroundImage:`repeating-linear-gradient(90deg,transparent,transparent 40px,rgba(212,168,83,0.015) 40px,rgba(212,168,83,0.015) 41px)`,
     pointerEvents:"none",zIndex:0},
-
-  // Login
-  loginRoot:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
-    background:"#0e0c0a",padding:20},
+  loginRoot:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#0e0c0a",padding:20},
   loginBg:{position:"fixed",top:0,left:0,right:0,bottom:0,
-    background:"radial-gradient(ellipse at 50% 40%, rgba(212,168,83,0.08) 0%, transparent 70%)",
-    pointerEvents:"none"},
+    background:"radial-gradient(ellipse at 50% 40%, rgba(212,168,83,0.08) 0%, transparent 70%)",pointerEvents:"none"},
   loginCard:{position:"relative",background:"rgba(30,24,16,0.95)",
     border:"1px solid rgba(212,168,83,0.25)",borderRadius:16,
     padding:"36px 28px",width:"100%",maxWidth:360,textAlign:"center",
@@ -766,16 +887,12 @@ const S={
   loginError:{color:"#e07a5f",fontSize:13,marginTop:8},
   loginBtn:{width:"100%",marginTop:16,padding:"13px",fontSize:14,fontWeight:700,
     background:"linear-gradient(135deg,#8B5E2A,#D4A853)",color:"#141210",
-    border:"none",borderRadius:8,cursor:"pointer",letterSpacing:"0.08em",
-    fontFamily:"Georgia,serif"},
+    border:"none",borderRadius:8,cursor:"pointer",letterSpacing:"0.08em",fontFamily:"Georgia,serif"},
   loginHint:{marginTop:20,fontSize:11,color:"#4a3a2a"},
   shake:{animation:"shake 0.4s ease"},
-
-  // Layout
   header:{position:"sticky",top:0,zIndex:20,display:"flex",alignItems:"center",
     justifyContent:"space-between",padding:"12px 18px",
-    background:"rgba(10,8,6,0.97)",borderBottom:"1px solid rgba(212,168,83,0.15)",
-    backdropFilter:"blur(8px)"},
+    background:"rgba(10,8,6,0.97)",borderBottom:"1px solid rgba(212,168,83,0.15)",backdropFilter:"blur(8px)"},
   logoText:{fontSize:18,fontWeight:700,letterSpacing:"0.15em",color:"#D4A853"},
   alertBadge:{background:"rgba(212,168,83,0.12)",border:"1px solid rgba(212,168,83,0.3)",
     color:"#D4A853",padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:700},
@@ -789,14 +906,10 @@ const S={
   toastWarn:{background:"#2a2010",color:"#D4A853",border:"1px solid #6a5020"},
   main:{position:"relative",zIndex:1,flex:1,overflowY:"auto",paddingBottom:90},
   page:{padding:"14px 14px 8px"},
-
-  // Cards
   card:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(212,168,83,0.12)",
     borderRadius:12,padding:"14px 12px",marginBottom:10},
   cardTitle:{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",
     color:"#D4A853",marginBottom:10,opacity:0.8},
-
-  // Form
   label:{fontSize:10,color:"#8a7a68",letterSpacing:"0.08em",textTransform:"uppercase"},
   select:{background:"#1e1a14",border:"1px solid rgba(212,168,83,0.2)",borderRadius:8,
     color:"#e8ddd0",padding:"11px 10px",fontSize:14,width:"100%",outline:"none",
@@ -804,15 +917,11 @@ const S={
   input:{background:"#1e1a14",border:"1px solid rgba(212,168,83,0.2)",borderRadius:8,
     color:"#e8ddd0",padding:"11px 10px",fontSize:14,width:"100%",outline:"none",
     boxSizing:"border-box",fontFamily:"Georgia,serif"},
-
-  // Results
   resultBox:{background:"rgba(30,24,16,0.9)",border:"1px solid rgba(212,168,83,0.3)",
     borderRadius:12,padding:"14px",marginBottom:12},
   rendBar:{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3,overflow:"hidden"},
   rendFill:{height:"100%",background:"linear-gradient(90deg,#8B5E2A,#D4A853)",borderRadius:3,transition:"width 0.4s"},
   hint:{textAlign:"center",color:"#5a4a3a",fontSize:13,padding:"16px 0"},
-
-  // Buttons
   btnBig:{width:"100%",padding:"14px",fontSize:14,fontWeight:700,
     background:"linear-gradient(135deg,#8B5E2A,#D4A853)",color:"#141210",
     border:"none",borderRadius:10,cursor:"pointer",letterSpacing:"0.06em",
@@ -829,8 +938,6 @@ const S={
     border:"1px solid rgba(212,168,83,0.25)",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
   btnDel:{padding:"9px 12px",fontSize:13,background:"rgba(200,80,60,0.05)",
     color:"#e07a5f",border:"1px solid rgba(200,80,60,0.2)",borderRadius:7,cursor:"pointer"},
-
-  // Nav
   nav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",
     maxWidth:480,zIndex:20,display:"flex",background:"rgba(8,6,4,0.98)",
     borderTop:"1px solid rgba(212,168,83,0.15)",backdropFilter:"blur(12px)",
@@ -841,8 +948,6 @@ const S={
   navBtnActive:{color:"#D4A853"},
   navIcon:{fontSize:17},
   navLabel:{fontSize:9,letterSpacing:"0.04em",textTransform:"uppercase",fontFamily:"Georgia,serif"},
-
-  // Misc
   pre:{background:"#0a0806",border:"1px solid rgba(212,168,83,0.12)",borderRadius:6,
     padding:"10px",fontSize:10,color:"#a09070",overflowX:"auto",lineHeight:1.7,
     marginTop:8,fontFamily:"monospace",whiteSpace:"pre-wrap",wordBreak:"break-all"},
