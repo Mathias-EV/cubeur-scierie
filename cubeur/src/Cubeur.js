@@ -140,6 +140,29 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
     showToast("Commande supprimée");
   };
 
+  // Actualiser les statuts depuis le Sheet
+  const [refreshing,setRefreshing]=useState(false);
+  const actualiserStatuts=async()=>{
+    if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
+    setRefreshing(true);
+    try{
+      const r=await fetch(`${scriptUrl}?action=getCommandes&t=${Date.now()}`);
+      const d=await r.json();
+      if(d.commandes){
+        const saved=JSON.parse(localStorage.getItem("mes_commandes")||"[]");
+        // Mettre à jour les statuts locaux depuis le Sheet
+        const updated=saved.map(cmd=>{
+          const sheetCmd=d.commandes.find(c=>c.id===cmd.id);
+          return sheetCmd?{...cmd,statut:sheetCmd.statut||cmd.statut}:cmd;
+        });
+        localStorage.setItem("mes_commandes",JSON.stringify(updated));
+        setMes(updated);
+        showToast("Statuts mis à jour ✓");
+      }
+    }catch(e){showToast("Erreur de connexion","error");}
+    setRefreshing(false);
+  };
+
   const nbAtt=mes.filter(c=>c.statut==="attente").length;
   return (
     <div style={S.root}>
@@ -176,9 +199,12 @@ function AppVendeur({scriptUrl,onLogout,showToast}){
         </div>}
 
         {tab==="mes-commandes"&&<div style={S.page}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
             <Stat label="Total" value={mes.length}/><Stat label="En attente" value={nbAtt} color="#D4A853"/>
           </div>
+          <button style={S.btnRefresh} onClick={actualiserStatuts} disabled={refreshing}>
+            {refreshing?"⏳ Actualisation...":"↻ Actualiser les statuts"}
+          </button>
           {mes.length===0?<Empty icon="📭" text="Aucune commande envoyée"/>:mes.map(c=>(
             <Card key={c.id}>
               {confirmDel===c.id?(
@@ -229,13 +255,14 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   const [loading,setLoading]=useState(false);
   const [expand,setExpand]=useState(null);
 
-  // useRef pour cube : toujours à jour dans les closures async (pas de stale state)
+  // État cubage — on utilise un ref EN PLUS du state pour avoir la valeur fraîche dans les async
+  const [cube,setCubeState]=useState({});
   const cubeRef=useRef({});
-  const [,forceRender]=useState(0);
-  const cube=cubeRef.current;
-  const setCubeState=(updater)=>{
-    cubeRef.current=typeof updater==="function"?updater(cubeRef.current):updater;
-    forceRender(v=>v+1);
+  // Wrapper qui met à jour les deux simultanément
+  const setCube=(updater)=>{
+    const next=typeof updater==="function"?updater(cubeRef.current):updater;
+    cubeRef.current=next;
+    setCubeState(next);
   };
 
   // Cubage libre
@@ -268,7 +295,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
 
   // Init état cubage pour une commande — pré-remplit depuis les données de la commande
   const initCubeCmd=(cmd)=>{
-    setCubeState(prev=>{
+    setCube(prev=>{
       if(prev[cmd.id])return prev; // déjà init
       const lignesMap={};
       (cmd.lignes||[]).forEach((l,i)=>{
@@ -288,7 +315,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
 
   // Mettre à jour un champ d'un produit et recalculer
   const setField=(cmdId,pid,field,value)=>{
-    setCubeState(prev=>{
+    setCube(prev=>{
       const cm={...prev[cmdId]};
       const p={...cm[pid],[field]:value};
       // recalcul
@@ -313,12 +340,12 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   // ── Valider UN produit ──
   const validerProduit=async(cmd, pid)=>{
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
-    const p=cube[cmd.id]?.[pid];
+    // Lire depuis le ref (toujours frais, même en async)
+    const p=cubeRef.current[cmd.id]?.[pid];
     if(!p||!isPret(p))return;
 
-    // Marquer exporting - écriture directe dans ref
-    cubeRef.current={...cubeRef.current,[cmd.id]:{...cubeRef.current[cmd.id],[pid]:{...cubeRef.current[cmd.id]?.[pid],exporting:true}}};
-    forceRender(v=>v+1);
+    // Marquer exporting
+    setCube(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exporting:true}}}));
 
     const date=fmtDate();
     const ep=parseFloat(p.epaisseur)/1000, la=parseFloat(p.largeur)/1000,
@@ -332,23 +359,24 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:pid});
 
-      // Lire cubeRef.current DIRECTEMENT après le await (pas la closure) — toujours frais
-      const etatCourant=cubeRef.current[cmd.id]||{};
+      // Après le await : lire cubeRef.current (frais, pas la closure)
+      const fresh=cubeRef.current[cmd.id]||{};
       const updatedCmd={
-        ...etatCourant,
-        [pid]:{...etatCourant[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}
+        ...fresh,
+        [pid]:{...fresh[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}
       };
-      // tousExportes calculé de façon synchrone sur l'objet construit
       const tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
 
-      // Écrire dans le ref ET déclencher re-render
-      cubeRef.current={...cubeRef.current,[cmd.id]:updatedCmd};
-      forceRender(v=>v+1);
+      // Sauvegarder dans ref + state
+      setCube(prev=>({...prev,[cmd.id]:updatedCmd}));
 
       if(tousExportes){
+        // Mettre à jour statut dans Sheet
         try{await callScript(scriptUrl,{type:"updateStatut",id:cmd.id,statut:"valide",date});}catch(e){}
+        // Mettre à jour l'UI localement sans attendre le Sheet
         setCmd(c=>c.map(x=>x.id===cmd.id?{...x,statut:"valide"}:x));
 
+        // Sauvegarder dans historique
         const hEntry={
           id:cmd.id, client:cmd.client,
           dateLivraison:cmd.dateLivraison||cmd.datelivraison,
@@ -369,8 +397,7 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
         showToast(`${p.produit} exporté ✓`);
       }
     }catch(e){
-      cubeRef.current={...cubeRef.current,[cmd.id]:{...cubeRef.current[cmd.id],[pid]:{...cubeRef.current[cmd.id]?.[pid],exporting:false}}};
-      forceRender(v=>v+1);
+      setCube(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id]?.[pid],exporting:false}}}));
       showToast("Erreur — réessaie","error");
     }
   };
