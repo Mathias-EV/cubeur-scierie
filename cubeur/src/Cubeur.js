@@ -57,7 +57,7 @@ function Row2({children,style}){ return <div style={{display:"grid",gridTemplate
 function Row3({children}){ return <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>{children}</div>; }
 function Sel({value,onChange,opts,ph="— choisir —"}){ return <select style={S.select} value={value} onChange={onChange}><option value="">{ph}</option>{opts.map(o=><option key={o} value={o}>{o}</option>)}</select>; }
 function Inp({value,onChange,ph,type="text",min,step,style}){ return <input type={type} style={{...S.input,...style}} value={value} onChange={onChange} placeholder={ph} min={min} step={step}/>; }
-function Num({value,onChange,ph,step="any"}){ return <Inp type="number" value={value} onChange={onChange} ph={ph} min="0" step={step}/>; }
+function Num({value,onChange,ph}){ return <input style={{...S.input,...S.numInput}} type="text" inputMode="decimal" value={value} onChange={onChange} placeholder={ph}/>; }
 function Card({title,children,accent,style}){ return <div style={{...S.card,...(accent?{borderColor:accent}:{}),...(style||{})}}>{title&&<div style={S.cardTitle}>{title}</div>}{children}</div>; }
 function Badge({status}){
   const map={attente:["#2a1f0a","#D4A853"],production:["#0a1f2a","#5bb8d4"],valide:["#0a2a15","#6dbf7e"],annule:["#2a0a0a","#e07a5f"]};
@@ -892,4 +892,5 @@ const S={
   navLabel:{fontSize:9,letterSpacing:"0.04em",textTransform:"uppercase",fontFamily:"Georgia,serif"},
   pre:{background:"#0a0806",border:"1px solid rgba(212,168,83,.12)",borderRadius:6,padding:"10px",fontSize:10,color:"#a09070",overflowX:"auto",lineHeight:1.7,marginTop:8,fontFamily:"monospace",whiteSpace:"pre-wrap",wordBreak:"break-all"},
   spinner:{width:16,height:16,border:"2px solid rgba(0,0,0,.2)",borderTop:"2px solid #141210",borderRadius:"50%",animation:"spin .8s linear infinite"},
+  numInput:{MozAppearance:"textfield",WebkitAppearance:"none",appearance:"none"},
 };
