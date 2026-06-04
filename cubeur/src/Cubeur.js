@@ -229,8 +229,14 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
   const [loading,setLoading]=useState(false);
   const [expand,setExpand]=useState(null);
 
-  // État cubage : { [cmdId]: { [prodId]: {epaisseur,largeur,longueur,nbUnites,volumeGrume, volUnit,volCharge,rend,perte, exporting,exported} } }
-  const [cube,setCubeState]=useState({});
+  // useRef pour cube : toujours à jour dans les closures async (pas de stale state)
+  const cubeRef=useRef({});
+  const [,forceRender]=useState(0);
+  const cube=cubeRef.current;
+  const setCubeState=(updater)=>{
+    cubeRef.current=typeof updater==="function"?updater(cubeRef.current):updater;
+    forceRender(v=>v+1);
+  };
 
   // Cubage libre
   const [freeForm,setFree]=useState(initCube);
@@ -310,8 +316,9 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     const p=cube[cmd.id]?.[pid];
     if(!p||!isPret(p))return;
 
-    // Marquer exporting
-    setCubeState(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exporting:true}}}));
+    // Marquer exporting - écriture directe dans ref
+    cubeRef.current={...cubeRef.current,[cmd.id]:{...cubeRef.current[cmd.id],[pid]:{...cubeRef.current[cmd.id]?.[pid],exporting:true}}};
+    forceRender(v=>v+1);
 
     const date=fmtDate();
     const ep=parseFloat(p.epaisseur)/1000, la=parseFloat(p.largeur)/1000,
@@ -325,18 +332,18 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:pid});
 
-      // Construire le nouvel état DIRECTEMENT depuis la valeur courante de cube
-      // (on ne passe pas par le setter pour lire tousExportes — plus de race condition)
-      const etatCourant=cube[cmd.id]||{};
+      // Lire cubeRef.current DIRECTEMENT après le await (pas la closure) — toujours frais
+      const etatCourant=cubeRef.current[cmd.id]||{};
       const updatedCmd={
         ...etatCourant,
         [pid]:{...etatCourant[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}
       };
-      // tousExportes calculé de façon purement synchrone sur l'objet construit
+      // tousExportes calculé de façon synchrone sur l'objet construit
       const tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
 
-      // Appliquer la mise à jour au state React
-      setCubeState(prev=>({...prev,[cmd.id]:updatedCmd}));
+      // Écrire dans le ref ET déclencher re-render
+      cubeRef.current={...cubeRef.current,[cmd.id]:updatedCmd};
+      forceRender(v=>v+1);
 
       if(tousExportes){
         try{await callScript(scriptUrl,{type:"updateStatut",id:cmd.id,statut:"valide",date});}catch(e){}
@@ -362,7 +369,8 @@ function AppScieur({scriptUrl,setScriptUrl,onLogout,showToast}){
         showToast(`${p.produit} exporté ✓`);
       }
     }catch(e){
-      setCubeState(prev=>({...prev,[cmd.id]:{...prev[cmd.id],[pid]:{...prev[cmd.id][pid],exporting:false}}}));
+      cubeRef.current={...cubeRef.current,[cmd.id]:{...cubeRef.current[cmd.id],[pid]:{...cubeRef.current[cmd.id]?.[pid],exporting:false}}};
+      forceRender(v=>v+1);
       showToast("Erreur — réessaie","error");
     }
   };
