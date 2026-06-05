@@ -25,9 +25,11 @@ const fmtDate=()=>new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digi
 const prodId=(cmdId,idx)=>`${cmdId}-P${idx+1}`;
 
 // ─── CALCUL selon unité ───────────────────────────────────────────────────────
-// Retourne { volUnit, volCharge, rend, perte, unite }
-// Pour m² : volUnit = surface unitaire (la×lo), volCharge = surface totale
-// Pour mL : volUnit = longueur unitaire (lo),   volCharge = linéaire total
+// Toutes les dimensions sont toujours stockées.
+// Le calcul de la valeur principale change selon l'unité :
+//   m³ : ep×la×lo×nb (volume)  + rendement vs grume
+//   m²  : la×lo×nb (surface)
+//   mL  : lo×nb (linéaire)
 function calculParUnite(p){
   const ep=parseFloat(p.epaisseur)/1000;
   const la=parseFloat(p.largeur)/1000;
@@ -36,18 +38,16 @@ function calculParUnite(p){
   const vg=parseFloat(p.volumeGrume);
   const unite=p.unite||"m³";
 
-  let vu=null, vc=null;
+  if(!ep||!la||!lo||!nb) return null;
+
+  let vu, vc;
   if(unite==="m³"){
-    if(!ep||!la||!lo||!nb) return null;
     vu=round(ep*la*lo,6); vc=round(vu*nb,4);
   } else if(unite==="m²"){
-    if(!la||!lo||!nb) return null;
-    vu=round(la*lo,6); vc=round(vu*nb,4);
-  } else if(unite==="mL"){
-    if(!lo||!nb) return null;
-    vu=round(lo,6); vc=round(vu*nb,4);
+    vu=round(la*lo,6); vc=round(vu*nb,4);   // surface
+  } else {
+    vu=round(lo,6); vc=round(vu*nb,4);       // linéaire
   }
-  if(vu===null) return null;
   const rend=(unite==="m³"&&vg>0)?round(vc/vg,4):null;
   const perte=rend!=null?round(1-rend,4):null;
   return { volUnit:vu, volCharge:vc, rend, perte, unite };
@@ -106,10 +106,7 @@ function RItem({label,value,big,color}){ return <div><div style={{fontSize:10,co
 
 // Affichage résumé dimensionnel selon unité
 function dimLabel(l){
-  const u=l.unite||"m³";
-  if(u==="m³") return `${l.epaisseur||"?"}×${l.largeur||"?"}mm · ${l.longueur||"?"}m · ${l.quantite||"?"}u.`;
-  if(u==="m²") return `${l.largeur||"?"}mm · ${l.longueur||"?"}m · ${l.quantite||"?"}u.`;
-  return `${l.longueur||"?"}m · ${l.quantite||"?"}u.`;
+  return `${l.epaisseur||"—"}×${l.largeur||"—"}mm · ${l.longueur||"—"}m · ${l.quantite||"—"}u.`;
 }
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -247,8 +244,10 @@ export default function App(){
 
   const isPret=(p)=>{
     const u=p.unite||"m³";
-    const hasVol=p.nbUnites&&p.longueur&&(u==="mL"||(u==="m²"&&p.largeur)||(u==="m³"&&p.largeur&&p.epaisseur));
-    return hasVol&&!p.exported&&!p.exporting&&(u!=="m³"||p.volumeGrume);
+    // Toujours demander les 3 dimensions + nb unités
+    const hasDims=p.epaisseur&&p.largeur&&p.longueur&&p.nbUnites;
+    // Vol. grume obligatoire seulement pour m³
+    return hasDims&&!p.exported&&!p.exporting&&(u!=="m³"||p.volumeGrume);
   };
 
   const validerProduit=async(cmd,pid)=>{
@@ -381,23 +380,12 @@ export default function App(){
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
-              {/* Dimensions selon unité */}
-              {(lg.unite||"m³")==="m³"&&(
-                <Row3>
-                  <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
-                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
-                  <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-                </Row3>
-              )}
-              {(lg.unite||"m³")==="m²"&&(
-                <Row2>
-                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
-                  <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-                </Row2>
-              )}
-              {(lg.unite||"m³")==="mL"&&(
-                <Field label="Longueur (m)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-              )}
+              {/* Dimensions complètes pour toutes les unités */}
+              <Row3>
+                <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
+                <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+              </Row3>
               <Field label="Quantité (unités)" style={{marginTop:10}}>
                 <Num value={lg.quantite} onChange={sl(i,"quantite")} ph="100"/>
               </Field>
@@ -523,17 +511,12 @@ export default function App(){
                             </div>
                           ):(
                             <>
-                              {/* Dimensions selon unité */}
-                              {u==="m³"&&<Row3>
+                              {/* Dimensions complètes pour toutes les unités */}
+                              <Row3>
                                 <Field label="Ép. mm"><Num value={p.epaisseur} onChange={e=>setField(cmd.id,pid,"epaisseur",e.target.value)} ph="27"/></Field>
                                 <Field label="Larg. mm"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
                                 <Field label="Long. m"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
-                              </Row3>}
-                              {u==="m²"&&<Row2>
-                                <Field label="Larg. mm"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
-                                <Field label="Long. m"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
-                              </Row2>}
-                              {u==="mL"&&<Field label="Longueur (m)"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>}
+                              </Row3>
 
                               <Row2 style={{marginTop:10}}>
                                 <Field label="Nb unités prod."><Num value={p.nbUnites} onChange={e=>setField(cmd.id,pid,"nbUnites",e.target.value)} ph={p.nbUnites||"200"}/></Field>
@@ -616,9 +599,7 @@ export default function App(){
                         <span style={{background:"rgba(91,184,212,.12)",color:"#5bb8d4",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>{u}</span>
                       </div>
                       <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:8}}>
-                        {u==="m³"&&`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m · ${l.nbUnites}u.`}
-                        {u==="m²"&&`${l.largeur}mm · ${l.longueur}m · ${l.nbUnites}u.`}
-                        {u==="mL"&&`${l.longueur}m · ${l.nbUnites}u.`}
+                        {`${l.epaisseur||"—"}mm × ${l.largeur||"—"}mm · ${l.longueur||"—"}m · ${l.nbUnites||"—"}u.`}
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":"1fr 1fr",gap:8}}>
                         {u==="m³"&&<Mini label="Grume" value={m3f(l.volumeGrume||0)} color="#a09080"/>}
