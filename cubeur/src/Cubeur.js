@@ -38,29 +38,31 @@ function calculParUnite(p){
   const vg=parseFloat(p.volumeGrume);
   const unite=p.unite||"m³";
 
-  if(unite==="m³"&&(!ep||!la||!lo||!nb)) return null;
+  // m³ : toutes les dims + nb obligatoires
+  if(unite==="m³"){
+    if(!ep||!la||!lo||!nb) return null;
+    const vu=round(ep*la*lo,6), vc=round(vu*nb,4);
+    const rend=vg>0?round(vc/vg,4):null;
+    const perte=rend!=null?round(1-rend,4):null;
+    return { volUnit:vu, volCharge:vc, volReel:null, rend, perte, unite };
+  }
+
+  // m² et mL : nb seul est obligatoire, dims sont optionnelles
   if(!nb) return null;
 
-  let vu, vc, volReel=null;
-  if(unite==="m³"){
-    vu=round(ep*la*lo,6); vc=round(vu*nb,4);
-  } else if(unite==="m²"){
-    // vu = surface unitaire (la×lo) si dims dispo
-    vu=(la&&lo)?round(la*lo,6):null;
-    vc=round(nb,4); // nb = m² total saisi
-    // Volume réel = surface totale × épaisseur (si ep disponible)
-    if(ep&&nb) volReel=round(nb*ep,4);
+  let vu=null, vc=null, volReel=null;
+  if(unite==="m²"){
+    vc=round(nb,4);                                    // total m² saisi directement
+    if(la&&lo) vu=round(la*lo,6);                     // surface unitaire si dispo
+    if(ep)     volReel=round(nb*ep,4);                // vol réel = m² × épaisseur
   } else {
     // mL
-    vu=lo?round(lo,6):null;
-    vc=round(nb,4); // nb = mL total saisi
-    // Volume réel = linéaire total × épaisseur × largeur (si ep+la disponibles)
-    if(ep&&la&&nb) volReel=round(nb*ep*la,4);
+    vc=round(nb,4);                                    // total mL saisi directement
+    if(lo)    vu=round(lo,6);                         // longueur unitaire si dispo
+    if(ep&&la) volReel=round(nb*ep*la,4);             // vol réel = mL × ep × la
   }
-  // Rendement : m³ vs grume direct | m²/mL via volume réel calculé si possible
-  let rend=null, perte=null;
-  if(unite==="m³"&&vg>0){ rend=round(vc/vg,4); perte=round(1-rend,4); }
-  else if(unite!=="m³"&&volReel!=null&&vg>0){ rend=round(volReel/vg,4); perte=round(1-rend,4); }
+  const rend=(volReel!=null&&vg>0)?round(volReel/vg,4):null;
+  const perte=rend!=null?round(1-rend,4):null;
   return { volUnit:vu, volCharge:vc, volReel, rend, perte, unite };
 }
 
@@ -246,8 +248,12 @@ export default function App(){
       const cm={...prev[cmdId]};
       const p={...cm[pid],[field]:value};
       const res=calculParUnite(p);
-      if(res){p.volUnit=res.volUnit;p.volCharge=res.volCharge;p.rend=res.rend;p.perte=res.perte;}
-      else{p.volUnit=null;p.volCharge=null;p.rend=null;p.perte=null;}
+      if(res){
+        p.volUnit=res.volUnit; p.volCharge=res.volCharge;
+        p.volReel=res.volReel; p.rend=res.rend; p.perte=res.perte;
+      } else {
+        p.volUnit=null; p.volCharge=null; p.volReel=null; p.rend=null; p.perte=null;
+      }
       cm[pid]=p;
       return {...prev,[cmdId]:cm};
     });
@@ -551,7 +557,10 @@ export default function App(){
                                 <Field label={u==="m²"?"Total produit (m²)":u==="mL"?"Total produit (mL)":"Nb unités prod."}>
                                   <Num value={p.nbUnites} onChange={e=>setField(cmd.id,pid,"nbUnites",e.target.value)} ph={p.nbUnites||"200"}/>
                                 </Field>
-                                {u==="m³"&&<Field label="Vol. grume (m³)"><Num value={p.volumeGrume} onChange={e=>setField(cmd.id,pid,"volumeGrume",e.target.value)} ph="2.5"/></Field>}
+                                {/* Grume pour m³ obligatoire, pour m²/mL optionnelle si on veut le rendement */}
+                                <Field label={u==="m³"?"Vol. grume (m³)":"Vol. grume m³ (opt.)"}>
+                                  <Num value={p.volumeGrume} onChange={e=>setField(cmd.id,pid,"volumeGrume",e.target.value)} ph="2.5"/>
+                                </Field>
                               </Row2>
 
                               {p.volCharge!=null&&(
