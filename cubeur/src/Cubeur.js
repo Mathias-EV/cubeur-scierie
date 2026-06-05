@@ -94,11 +94,11 @@ function UniteSel({value,onChange}){
   return <div style={{display:"flex",gap:6}}>
     {UNITES.map(u=>(
       <button key={u} type="button" onClick={()=>onChange(u)}
-        style={{flex:1,padding:"9px 4px",fontSize:13,fontWeight:700,fontFamily:"Georgia,serif",
+        style={{flex:1,padding:"9px 4px",fontSize:13,fontWeight:700,fontFamily:"inherit",
           borderRadius:7,cursor:"pointer",transition:"all 0.15s",
-          background:value===u?"linear-gradient(135deg,#8B5E2A,#D4A853)":"rgba(212,168,83,0.06)",
-          color:value===u?"#141210":"#D4A853",
-          border:value===u?"none":"1px solid rgba(212,168,83,0.2)"}}>
+          background:value===u?"#2D6A4F":"rgba(255,255,255,.05)",
+          color:value===u?"#FFFFFF":"#8A9BB0",
+          border:value===u?"1px solid #2D6A4F":"1px solid rgba(255,255,255,.1)"}}>
         {u}
       </button>
     ))}
@@ -107,15 +107,15 @@ function UniteSel({value,onChange}){
 
 function Card({title,children,accent,style}){ return <div style={{...S.card,...(accent?{borderColor:accent}:{}),...(style||{})}}>{title&&<div style={S.cardTitle}>{title}</div>}{children}</div>; }
 function Badge({status}){
-  const map={attente:["#2a1f0a","#D4A853"],production:["#0a1f2a","#5bb8d4"],valide:["#0a2a15","#6dbf7e"],annule:["#2a0a0a","#e07a5f"]};
+  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"]};
   const [bg,fg]=map[status]||map.attente;
-  return <span style={{background:bg,color:fg,padding:"3px 10px",borderRadius:20,fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée"}[status]||status}</span>;
+  return <span style={{background:bg,color:fg,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,whiteSpace:"nowrap",letterSpacing:"0.02em"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée"}[status]||status}</span>;
 }
-function Stat({label,value,color}){ return <div style={{background:"rgba(212,168,83,0.05)",border:"1px solid rgba(212,168,83,0.12)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:color||"#D4A853"}}>{value}</div><div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase",letterSpacing:"0.08em",marginTop:2}}>{label}</div></div>; }
-function Empty({icon,text}){ return <div style={{textAlign:"center",padding:"50px 20px",color:"#5a4a3a"}}><div style={{fontSize:36,marginBottom:10}}>{icon}</div><div style={{fontSize:14}}>{text}</div></div>; }
+function Stat({label,value,color}){ return <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:color||"#34C759"}}>{value}</div><div style={{fontSize:9,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.07em",marginTop:2}}>{label}</div></div>; }
+function Empty({icon,text}){ return <div style={{textAlign:"center",padding:"50px 20px",color:"#4A5568"}}><div style={{fontSize:36,marginBottom:10}}>{icon}</div><div style={{fontSize:14,color:"#8A9BB0"}}>{text}</div></div>; }
 function Spinner(){ return <div style={S.spinner}/>; }
-function Mini({label,value,color}){ return <div style={{textAlign:"center"}}><div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase",marginBottom:2}}>{label}</div><div style={{fontSize:11,fontWeight:700,color:color||"#e8ddd0"}}>{value}</div></div>; }
-function RItem({label,value,big,color}){ return <div><div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{label}</div><div style={{fontSize:big?18:14,fontWeight:big?700:600,color:color||"#e8ddd0"}}>{value}</div></div>; }
+function Mini({label,value,color}){ return <div style={{textAlign:"center"}}><div style={{fontSize:9,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:2}}>{label}</div><div style={{fontSize:12,fontWeight:600,color:color||"#E8ECEF"}}>{value}</div></div>; }
+function RItem({label,value,big,color}){ return <div><div style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3,fontWeight:500}}>{label}</div><div style={{fontSize:big?18:14,fontWeight:big?700:600,color:color||"#E8ECEF"}}>{value}</div></div>; }
 
 // Affichage résumé dimensionnel selon unité
 function dimLabel(l){
@@ -416,7 +416,7 @@ export default function App(){
       <Toast t={toast}/>
       <header style={S.header}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:8,height:8,borderRadius:"50%",background:"#D4A853",boxShadow:"0 0 8px #D4A853"}}/>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"#34C759",boxShadow:"0 0 8px rgba(52,199,89,.6)"}}/>
           <span style={S.logoText}>SCIERIE</span>
         </div>
         {cmdAtt.length>0&&<div style={S.alertBadge}>{cmdAtt.length} en attente</div>}
@@ -469,7 +469,7 @@ export default function App(){
             </Card>
           ))}
 
-          <button style={{...S.btnBig,background:"rgba(212,168,83,.08)",color:"#D4A853",border:"1px solid rgba(212,168,83,.3)",marginBottom:10}} onClick={addL}>
+          <button style={{...S.btnBig,background:"rgba(212,168,83,.08)",color:"#34C759",border:"1px solid rgba(212,168,83,.3)",marginBottom:10}} onClick={addL}>
             + Ajouter un produit
           </button>
           <Card title="Notes">
@@ -480,7 +480,7 @@ export default function App(){
           </button>
 
           {commandes.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(212,168,83,.15)"}}>Commandes envoyées</div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>
             <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
             {commandes.map(c=>(
               <Card key={c.id}>
@@ -495,17 +495,17 @@ export default function App(){
                 ):(
                   <>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                      <div><div style={{fontSize:11,color:"#6a5a4a"}}>{c.id}</div><div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{c.client}</div></div>
+                      <div><div style={{fontSize:11,color:"#8A9BB0",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}</div></div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}><Badge status={c.statut||"attente"}/><button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button></div>
                     </div>
                     {(c.lignes||[]).map((l,i)=>(
                       <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
-                        • <strong style={{color:"#D4A853"}}>{l.produit}</strong>{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
+                        • <strong style={{color:"#34C759"}}>{l.produit}</strong>{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
                         <span style={{color:"#5bb8d4",fontSize:11}}> [{l.unite||"m³"}]</span>
-                        <span style={{color:"#6a5a4a",fontFamily:"monospace",fontSize:11}}> — {dimLabel(l)}</span>
+                        <span style={{color:"#8A9BB0",fontFamily:"monospace",fontSize:11}}> — {dimLabel(l)}</span>
                       </div>
                     ))}
-                    <div style={{fontSize:12,color:"#6a5a4a",marginTop:6}}>Livraison : <strong style={{color:"#c4b09a"}}>{c.dateLivraison||c.datelivraison}</strong></div>
+                    <div style={{fontSize:12,color:"#8A9BB0",marginTop:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500}}>{c.dateLivraison||c.datelivraison}</strong></div>
                   </>
                 )}
               </Card>
@@ -516,12 +516,12 @@ export default function App(){
         {/* ══ À RÉALISER ══ */}
         {tab==="arealiser"&&<div style={S.page}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
-            <Stat label="Attente" value={cmdAtt.length} color="#D4A853"/>
+            <Stat label="Attente" value={cmdAtt.length} color="#34C759"/>
             <Stat label="Prod." value={cmdProd.length} color="#5bb8d4"/>
             <Stat label="Validées" value={cmdVal.length} color="#6dbf7e"/>
           </div>
           <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
-          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#D4A853",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
           {aRealiser.length===0&&scriptUrl&&!loading&&<Empty icon="✅" text="Aucune commande à réaliser"/>}
 
           {aRealiser.map(cmd=>{
@@ -533,13 +533,13 @@ export default function App(){
             return (
               <div key={cmd.id} style={{...S.card,marginBottom:12,borderColor:isOpen?"rgba(91,184,212,.4)":"rgba(212,168,83,.12)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-                  <div><div style={{fontSize:11,color:"#5bb8d4"}}>{cmd.id}</div><div style={{fontWeight:700,color:"#e8ddd0",fontSize:15}}>{cmd.client}</div></div>
+                  <div><div style={{fontSize:11,color:"#0A84FF",fontWeight:500}}>{cmd.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{cmd.client}</div></div>
                   <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
                     <Badge status={cmd.statut||"attente"}/>
                     {cubeCmd&&<span style={{fontSize:10,color:"#6dbf7e"}}>{nbExp}/{nbTot} validé{nbTot>1?"s":""}</span>}
                   </div>
                 </div>
-                <div style={{fontSize:12,color:"#6a5a4a",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{cmd.dateLivraison||cmd.datelivraison}</strong>{cmd.notes&&<span style={{color:"#8a7a68",fontStyle:"italic"}}> · "{cmd.notes}"</span>}</div>
+                <div style={{fontSize:12,color:"#8A9BB0",marginBottom:6}}>📅 <strong style={{color:"#E8ECEF",fontWeight:500}}>{cmd.dateLivraison||cmd.datelivraison}</strong>{cmd.notes&&<span style={{color:"#8A9BB0",fontStyle:"italic"}}> · "{cmd.notes}"</span>}</div>
                 <div style={{marginBottom:10}}>
                   {(cmd.lignes||[]).map((l,i)=>{
                     const pid=prodId(cmd.id,i);
@@ -548,8 +548,8 @@ export default function App(){
                     return (
                       <div key={i} style={{fontSize:12,marginBottom:3,padding:"4px 8px",borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",background:exp?"rgba(109,191,126,.06)":"rgba(255,255,255,.02)",border:`1px solid ${exp?"rgba(109,191,126,.2)":"transparent"}`}}>
                         <span>
-                          <span style={{color:exp?"#6dbf7e":"#D4A853",fontWeight:700}}>{exp?"✓ ":""}{l.produit}</span>
-                          <span style={{color:"#8a7a68"}}>{l.essence?` · ${l.essence}`:""}</span>
+                          <span style={{color:exp?"#6dbf7e":"#34C759",fontWeight:700}}>{exp?"✓ ":""}{l.produit}</span>
+                          <span style={{color:"#8A9BB0"}}>{l.essence?` · ${l.essence}`:""}</span>
                           <span style={{color:"#5bb8d4",fontSize:10}}> [{u}]</span>
                           <span style={{color:"#5a4a3a",fontFamily:"monospace",fontSize:11}}> {dimLabel(l)}</span>
                         </span>
@@ -558,7 +558,7 @@ export default function App(){
                     );
                   })}
                 </div>
-                <button style={{...S.btnSmall,width:"100%",textAlign:"center",background:isOpen?"rgba(91,184,212,.12)":"rgba(212,168,83,.06)",color:isOpen?"#5bb8d4":"#D4A853",borderColor:isOpen?"rgba(91,184,212,.3)":"rgba(212,168,83,.2)"}}
+                <button style={{...S.btnSmall,width:"100%",textAlign:"center",background:isOpen?"rgba(91,184,212,.12)":"rgba(212,168,83,.06)",color:isOpen?"#5bb8d4":"#34C759",borderColor:isOpen?"rgba(91,184,212,.3)":"rgba(212,168,83,.2)"}}
                   onClick={()=>{if(!isOpen){initCubeCmd(cmd);setExpand(cmd.id);}else setExpand(null);}}>
                   {isOpen?"▲ Fermer":"👁 Voir commande"}
                 </button>
@@ -571,9 +571,9 @@ export default function App(){
                       return (
                         <div key={pid} style={{background:p.exported?"rgba(109,191,126,.04)":"rgba(255,255,255,.02)",border:`1px solid ${p.exported?"rgba(109,191,126,.3)":"rgba(212,168,83,.15)"}`,borderRadius:10,padding:"12px",marginBottom:12}}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                            <div style={{fontSize:12,fontWeight:700,color:p.exported?"#6dbf7e":"#D4A853",textTransform:"uppercase",letterSpacing:"0.07em"}}>
+                            <div style={{fontSize:12,fontWeight:700,color:p.exported?"#6dbf7e":"#34C759",textTransform:"uppercase",letterSpacing:"0.07em"}}>
                               {p.exported?"✓ ":""}{p.produit} · {p.essence}
-                              {p.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {p.qualite}</span>}
+                              {p.qualite&&<span style={{color:"#8A9BB0",fontWeight:400}}> · {p.qualite}</span>}
                               <span style={{color:"#5bb8d4",fontSize:11,fontWeight:400,textTransform:"none",letterSpacing:0}}> [{u}]</span>
                             </div>
                             <span style={{fontSize:10,color:"#5bb8d4",fontFamily:"monospace",background:"rgba(91,184,212,.08)",padding:"2px 6px",borderRadius:4}}>{pid}</span>
@@ -581,7 +581,7 @@ export default function App(){
                           {p.exported?(
                             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
                               {u==="m³"&&<Mini label="Grume" value={m3f(parseFloat(p.volumeGrume)||0)} color="#a09080"/>}
-                              <Mini label={u==="mL"?"Linéaire":"Volume/Surface"} value={m3f(p.volCharge||0,u)} color="#D4A853"/>
+                              <Mini label={u==="mL"?"Linéaire":"Volume/Surface"} value={m3f(p.volCharge||0,u)} color="#34C759"/>
                               {u==="m³"&&p.rend!=null&&<Mini label="Rend." value={pct(p.rend)} color="#6dbf7e"/>}
                               {u==="m³"&&p.perte!=null&&<Mini label="Perte" value={pct(p.perte)} color="#e07a5f"/>}
                             </div>
@@ -614,9 +614,9 @@ export default function App(){
 
                               {p.volCharge!=null&&(
                                 <div style={{marginTop:8,background:"rgba(212,168,83,.04)",borderRadius:8,padding:"8px 10px",display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":((p.volUnit!=null&&p.rend!=null)?"1fr 1fr 1fr 1fr":p.volUnit!=null?"1fr 1fr 1fr":"1fr 1fr"),gap:6}}>
-                                  {(u==="m³"||p.volUnit!=null)&&<Mini label={u==="m³"?"Vol. unit.":"Dim. unit."} value={m3f(p.volUnit||0,u)} color="#e8ddd0"/>}
-                                  <Mini label={u==="mL"?"Total (mL)":u==="m²"?"Total (m²)":"Vol. charge"} value={m3f(p.volCharge,u)} color="#D4A853"/>
-                                  {u!=="m³"&&p.volReel!=null&&<Mini label="Vol. réel m³" value={m3f(p.volReel)} color="#C4904A"/>}
+                                  {(u==="m³"||p.volUnit!=null)&&<Mini label={u==="m³"?"Vol. unit.":"Dim. unit."} value={m3f(p.volUnit||0,u)} color="#E8ECEF"/>}
+                                  <Mini label={u==="mL"?"Total (mL)":u==="m²"?"Total (m²)":"Vol. charge"} value={m3f(p.volCharge,u)} color="#34C759"/>
+                                  {u!=="m³"&&p.volReel!=null&&<Mini label="Vol. réel m³" value={m3f(p.volReel)} color="#FF9F0A"/>}
                                   {p.rend!=null&&<Mini label="Rendement" value={pct(p.rend)} color="#6dbf7e"/>}
                                   {p.perte!=null&&<Mini label="Perte" value={pct(p.perte)} color="#e07a5f"/>}
                                 </div>
@@ -639,11 +639,11 @@ export default function App(){
           })}
 
           {cmdVal.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#6dbf7e",marginTop:20,marginBottom:8,paddingBottom:5,borderBottom:"1px solid rgba(109,191,126,.2)"}}>Validées récentes</div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#34C759",marginTop:20,marginBottom:8,paddingBottom:5,borderBottom:"1px solid rgba(52,199,89,.15)"}}>Validées récentes</div>
             {cmdVal.map(cmd=>(
               <div key={cmd.id} style={{...S.card,borderColor:"rgba(109,191,126,.15)",opacity:0.7}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div><div style={{fontSize:11,color:"#5bb8d4"}}>{cmd.id}</div><div style={{fontWeight:700,color:"#e8ddd0"}}>{cmd.client}</div></div>
+                  <div><div style={{fontSize:11,color:"#0A84FF",fontWeight:500}}>{cmd.id}</div><div style={{fontWeight:700,color:"#E8ECEF"}}>{cmd.client}</div></div>
                   <Badge status="valide"/>
                 </div>
               </div>
@@ -660,14 +660,14 @@ export default function App(){
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                   <div>
                     <div style={{fontSize:11,color:"#5bb8d4"}}>{histDetail.id}</div>
-                    <div style={{fontWeight:700,color:"#e8ddd0",fontSize:18}}>{histDetail.type==="libre"?"📐 Cubage libre":histDetail.client}</div>
+                    <div style={{fontWeight:700,color:"#E8ECEF",fontSize:18}}>{histDetail.type==="libre"?"📐 Cubage libre":histDetail.client}</div>
                   </div>
                   <button style={{...S.btnSmall,fontSize:16,padding:"6px 14px"}} onClick={()=>setHistDetail(null)}>✕</button>
                 </div>
-                <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14}}>
+                <div style={{fontSize:12,color:"#8A9BB0",marginBottom:14}}>
                   📅 Livraison : <strong style={{color:"#c4b09a"}}>{histDetail.dateLivraison}</strong>
                   {" · "}Validée le <strong style={{color:"#c4b09a"}}>{histDetail.dateValidation}</strong>
-                  {histDetail.notes&&<div style={{marginTop:4,color:"#8a7a68",fontStyle:"italic"}}>"{histDetail.notes}"</div>}
+                  {histDetail.notes&&<div style={{marginTop:4,color:"#8A9BB0",fontStyle:"italic"}}>"{histDetail.notes}"</div>}
                 </div>
                 {/* Totaux globaux */}
                 {histDetail.lignes&&(()=>{
@@ -675,7 +675,7 @@ export default function App(){
                   const m2lines=histDetail.lignes.filter(l=>l.unite==="m²");
                   const mLlines=histDetail.lignes.filter(l=>l.unite==="mL");
                   return <div style={{background:"rgba(212,168,83,.06)",borderRadius:10,padding:"10px 12px",marginBottom:14,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-                    {m3lines.length>0&&<Stat label="Total m³" value={m3f(m3lines.reduce((s,l)=>s+(l.volCharge||0),0))} color="#D4A853"/>}
+                    {m3lines.length>0&&<Stat label="Total m³" value={m3f(m3lines.reduce((s,l)=>s+(l.volCharge||0),0))} color="#34C759"/>}
                     {m2lines.length>0&&<Stat label="Total m²" value={m3f(m2lines.reduce((s,l)=>s+(l.volCharge||0),0),"m²")} color="#5bb8d4"/>}
                     {mLlines.length>0&&<Stat label="Total mL" value={m3f(mLlines.reduce((s,l)=>s+(l.volCharge||0),0),"mL")} color="#9A7A54"/>}
                   </div>;
@@ -685,19 +685,19 @@ export default function App(){
                   return (
                     <div key={i} style={{background:"rgba(30,22,12,.95)",border:"1px solid rgba(212,168,83,.3)",borderRadius:10,padding:"12px",marginBottom:8}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                        <div style={{fontWeight:700,color:"#D4A853",fontSize:13}}>{l.produit} · {l.essence}{l.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {l.qualite}</span>}</div>
+                        <div style={{fontWeight:700,color:"#34C759",fontSize:13}}>{l.produit} · {l.essence}{l.qualite&&<span style={{color:"#8A9BB0",fontWeight:400}}> · {l.qualite}</span>}</div>
                         <span style={{background:"rgba(91,184,212,.12)",color:"#5bb8d4",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>{u}</span>
                       </div>
-                      <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:8}}>
+                      <div style={{fontSize:11,color:"#8A9BB0",fontFamily:"monospace",marginBottom:8}}>
                         {`${l.epaisseur||"—"}mm × ${l.largeur||"—"}mm · ${l.longueur||"—"}m · ${l.nbUnites||"—"}u.`}
                       </div>
                       {(()=>{
                         const cols=u==="m³"?4:(l.volUnit&&l.rend!=null?5:l.volUnit?3:2);
                         return <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},1fr)`,gap:8}}>
                           {u==="m³"&&<Mini label="Grume" value={m3f(l.volumeGrume||0)} color="#a09080"/>}
-                          {u!=="m³"&&l.volUnit&&<Mini label="Dim. unit." value={m3f(l.volUnit,u)} color="#e8ddd0"/>}
-                          <Mini label={u==="mL"?"Total mL":u==="m²"?"Total m²":"Volume"} value={m3f(l.volCharge||0,u)} color="#D4A853"/>
-                          {u!=="m³"&&l.volReel!=null&&<Mini label="Vol. réel m³" value={m3f(l.volReel)} color="#C4904A"/>}
+                          {u!=="m³"&&l.volUnit&&<Mini label="Dim. unit." value={m3f(l.volUnit,u)} color="#E8ECEF"/>}
+                          <Mini label={u==="mL"?"Total mL":u==="m²"?"Total m²":"Volume"} value={m3f(l.volCharge||0,u)} color="#34C759"/>
+                          {u!=="m³"&&l.volReel!=null&&<Mini label="Vol. réel m³" value={m3f(l.volReel)} color="#FF9F0A"/>}
                           {l.rend!=null&&<Mini label="Rendement" value={pct(l.rend)} color="#6dbf7e"/>}
                           {l.perte!=null&&<Mini label="Perte" value={pct(l.perte)} color="#e07a5f"/>}
                         </div>;
@@ -711,10 +711,10 @@ export default function App(){
           )}
 
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{color:"#8a7a68",fontSize:12}}>{histCmds.length} commande{histCmds.length>1?"s":""} réalisée{histCmds.length>1?"s":""}</div>
+            <div style={{color:"#8A9BB0",fontSize:12}}>{histCmds.length} commande{histCmds.length>1?"s":""} réalisée{histCmds.length>1?"s":""}</div>
             <button style={S.btnRefresh} onClick={loadHist}>{histLoading?"⏳":"↻ Actualiser"}</button>
           </div>
-          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#D4A853",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
           {histCmds.length===0&&!histLoading&&scriptUrl&&<Empty icon="📚" text="Aucune commande validée — appuie sur ↻ pour charger"/>}
           {histLoading&&<Empty icon="⏳" text="Chargement..."/>}
 
@@ -728,31 +728,31 @@ export default function App(){
               onClick={()=>setHistDetail(h)}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                 <div>
-                  <div style={{fontSize:11,color:"#5bb8d4"}}>{h.id}</div>
-                  <div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{isLibre?"Cubage libre":h.client}</div>
+                  <div style={{fontSize:11,color:"#0A84FF",fontWeight:500}}>{h.id}</div>
+                  <div style={{fontWeight:700,color:"#E8ECEF",fontSize:14}}>{isLibre?"Cubage libre":h.client}</div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
                   <span style={{fontSize:11,color:accentC,background:`rgba(${isLibre?"154,122,84":"109,191,126"},.1)`,padding:"3px 8px",borderRadius:12,border:`1px solid rgba(${isLibre?"154,122,84":"109,191,126"},.2)`}}>
                     {isLibre?"📐 Libre":"✓ Réalisée"}
                   </span>
-                  <span style={{fontSize:10,color:"#6a5a4a"}}>{h.dateValidation}</span>
+                  <span style={{fontSize:10,color:"#8A9BB0"}}>{h.dateValidation}</span>
                 </div>
               </div>
-              <div style={{fontSize:12,color:"#6a5a4a",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{isLibre?h.dateValidation:h.dateLivraison}</strong></div>
+              <div style={{fontSize:12,color:"#8A9BB0",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{isLibre?h.dateValidation:h.dateLivraison}</strong></div>
               {/* Résumé compact */}
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
                 {(h.lignes||[]).map((l,i)=>(
-                  <span key={i} style={{fontSize:11,color:"#a09080",background:"rgba(255,255,255,.03)",padding:"2px 8px",borderRadius:10,border:"1px solid rgba(212,168,83,.1)"}}>
+                  <span key={i} style={{fontSize:11,color:"#B0BEC5",background:"rgba(255,255,255,.05)",padding:"2px 8px",borderRadius:10,border:"1px solid rgba(255,255,255,.08)"}}>
                     {l.produit} <span style={{color:"#5bb8d4"}}>[{l.unite||"m³"}]</span>
                   </span>
                 ))}
               </div>
-              <div style={{fontSize:11,color:"#6a5a4a"}}>
-                Total : <strong style={{color:"#D4A853"}}>{m3f((h.lignes||[]).filter(l=>(l.unite||"m³")==="m³").reduce((s,l)=>s+(l.volCharge||0),0))}</strong>
+              <div style={{fontSize:11,color:"#8A9BB0"}}>
+                Total : <strong style={{color:"#34C759"}}>{m3f((h.lignes||[]).filter(l=>(l.unite||"m³")==="m³").reduce((s,l)=>s+(l.volCharge||0),0))}</strong>
                 {(h.lignes||[]).some(l=>l.unite==="m²")&&<span> · <strong style={{color:"#5bb8d4"}}>{m3f((h.lignes||[]).filter(l=>l.unite==="m²").reduce((s,l)=>s+(l.volCharge||0),0),"m²")}</strong></span>}
                 {(h.lignes||[]).some(l=>l.unite==="mL")&&<span> · <strong style={{color:"#9A7A54"}}>{m3f((h.lignes||[]).filter(l=>l.unite==="mL").reduce((s,l)=>s+(l.volCharge||0),0),"mL")}</strong></span>}
               </div>
-              <div style={{fontSize:10,color:"#5bb8d4",marginTop:6,textAlign:"right"}}>Appuyer pour voir le détail →</div>
+              <div style={{fontSize:10,color:"#0A84FF",marginTop:6,textAlign:"right"}}>Appuyer pour voir le détail →</div>
             </div>
             );
           })}
@@ -760,7 +760,7 @@ export default function App(){
 
         {/* ══ CUBAGE LIBRE ══ */}
         {tab==="libre"&&<div style={S.page}>
-          <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14,textAlign:"center"}}>Cubage hors commande — sciage libre</div>
+          <div style={{fontSize:12,color:"#8A9BB0",marginBottom:14,textAlign:"center"}}>Cubage hors commande — sciage libre</div>
 
           <Card title="Produit">
             <Field label="Unité de mesure" style={{marginBottom:12}}>
@@ -807,7 +807,7 @@ export default function App(){
                 <div style={{display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr":(freeRes.volUnit!=null&&freeRes.rend!=null)?"1fr 1fr 1fr 1fr":freeRes.volUnit!=null?"1fr 1fr 1fr":"1fr 1fr",gap:12,marginBottom:12}}>
                   {(u==="m³"||freeRes.volUnit!=null)&&<RItem label={u==="m³"?"Vol. unitaire":"Dim. unitaire"} value={m3f(freeRes.volUnit||0,u)}/>}
                   <RItem label={u==="m²"?"Total m²":u==="mL"?"Total mL":"Vol. charge"} value={m3f(freeRes.volCharge,u)} big/>
-                  {u!=="m³"&&freeRes.volReel!=null&&<RItem label="Vol. réel m³" value={m3f(freeRes.volReel)} color="#C4904A"/>}
+                  {u!=="m³"&&freeRes.volReel!=null&&<RItem label="Vol. réel m³" value={m3f(freeRes.volReel)} color="#FF9F0A"/>}
                   {freeRes.rend!=null&&<RItem label="Rendement" value={pct(freeRes.rend)} color="#6dbf7e"/>}
                   {freeRes.perte!=null&&<RItem label="Perte" value={pct(freeRes.perte)} color="#e07a5f"/>}
                 </div>
@@ -829,25 +829,25 @@ export default function App(){
             {freeHistory.slice(0,5).map(e=>{
               const u=e.unite||"m³";
               return (
-                <div key={e.id} style={{...S.card,borderColor:"rgba(154,122,84,.25)",borderLeft:"3px solid rgba(154,122,84,.5)"}}>
+                <div key={e.id} style={{...S.card,borderColor:"rgba(52,199,89,.15)",borderLeft:"3px solid rgba(52,199,89,.4)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
                     <div>
-                      <span style={{fontWeight:700,color:"#D4A853"}}>{e.produit} · {e.essence}</span>
+                      <span style={{fontWeight:700,color:"#34C759"}}>{e.produit} · {e.essence}</span>
                       <span style={{marginLeft:6,fontSize:11,color:"#5bb8d4",background:"rgba(91,184,212,.08)",padding:"1px 6px",borderRadius:8}}>{u}</span>
                     </div>
-                    <span style={{fontSize:10,color:"#9A7A54",background:"rgba(154,122,84,.1)",padding:"2px 7px",borderRadius:8,border:"1px solid rgba(154,122,84,.2)"}}>Libre</span>
+                    <span style={{fontSize:10,color:"#FF9F0A",background:"rgba(255,159,10,.1)",padding:"2px 7px",borderRadius:8,border:"1px solid rgba(255,159,10,.2)"}}>Libre</span>
                   </div>
-                  <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:6}}>
+                  <div style={{fontSize:11,color:"#8A9BB0",fontFamily:"monospace",marginBottom:6}}>
                     {e.epaisseur&&`${e.epaisseur}×${e.largeur}mm · `}{e.longueur&&`${e.longueur}m · `}
-                    <strong style={{color:"#D4A853"}}>{m3f(e.volCharge||0,u)}</strong>
-                    {e.volReel!=null&&<span style={{color:"#C4904A"}}> · réel {m3f(e.volReel)}</span>}
-                    {e.rend!=null&&<span style={{color:"#6dbf7e"}}> · {pct(e.rend)}</span>}
+                    <strong style={{color:"#34C759"}}>{m3f(e.volCharge||0,u)}</strong>
+                    {e.volReel!=null&&<span style={{color:"#FF9F0A"}}> · réel {m3f(e.volReel)}</span>}
+                    {e.rend!=null&&<span style={{color:"#34C759"}}> · {pct(e.rend)}</span>}
                   </div>
                   <div style={{fontSize:10,color:"#5a4a3a"}}>{e.date}</div>
                 </div>
               );
             })}
-            {freeHistory.length>5&&<div style={{fontSize:11,color:"#6a5a4a",textAlign:"center",marginTop:6}}>+ {freeHistory.length-5} autres · voir l'onglet Historique</div>}
+            {freeHistory.length>5&&<div style={{fontSize:11,color:"#8A9BB0",textAlign:"center",marginTop:6}}>+ {freeHistory.length-5} autres · voir l'onglet Historique</div>}
           </>}
         </div>}
 
@@ -981,10 +981,10 @@ function json(o){
     .setMimeType(ContentService.MimeType.JSON);
 }`}</pre>
           </Card>
-          <div style={{background:"#1a1510",border:"1px solid rgba(212,168,83,.1)",borderRadius:8,padding:14,fontSize:12,color:"#8a7a68",lineHeight:1.9}}>
-            <strong style={{color:"#D4A853",display:"block",marginBottom:6}}>⚠ Nouveau déploiement requis</strong>
-            Extensions → Apps Script → remplace tout → <strong style={{color:"#D4A853"}}>Nouveau déploiement</strong> → App Web → Tout le monde → Déployer → copier l'URL.<br/>
-            <strong style={{color:"#D4A853",display:"block",margin:"8px 0 4px"}}>Nouvel onglet Sheet :</strong>
+          <div style={{background:"#1A1D20",border:"1px solid rgba(255,255,255,.07)",borderRadius:8,padding:14,fontSize:12,color:"#8A9BB0",lineHeight:1.9}}>
+            <strong style={{color:"#34C759",display:"block",marginBottom:6}}>⚠ Nouveau déploiement requis</strong>
+            Extensions → Apps Script → remplace tout → <strong style={{color:"#34C759"}}>Nouveau déploiement</strong> → App Web → Tout le monde → Déployer → copier l'URL.<br/>
+            <strong style={{color:"#34C759",display:"block",margin:"8px 0 4px"}}>Nouvel onglet Sheet :</strong>
             • <strong>Historique</strong> — 1 ligne par commande validée (JSON) · commun à tous les appareils<br/>
             • <strong>Scieur</strong> — ajoute la colonne "Unité" en fin de ligne
           </div>
@@ -1011,37 +1011,37 @@ function json(o){
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
 const S={
-  root:{minHeight:"100vh",background:"#141210",color:"#e8ddd0",fontFamily:"Georgia,'Times New Roman',serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
-  header:{position:"sticky",top:0,zIndex:20,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 18px",background:"rgba(10,8,6,.97)",borderBottom:"1px solid rgba(212,168,83,.15)",backdropFilter:"blur(8px)"},
-  logoText:{fontSize:18,fontWeight:700,letterSpacing:"0.15em",color:"#D4A853"},
-  alertBadge:{background:"rgba(212,168,83,.12)",border:"1px solid rgba(212,168,83,.3)",color:"#D4A853",padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:700},
-  toast:{position:"fixed",top:65,left:"50%",transform:"translateX(-50%)",zIndex:200,padding:"10px 20px",borderRadius:20,fontSize:13,fontWeight:600,whiteSpace:"nowrap",boxShadow:"0 4px 20px rgba(0,0,0,.6)"},
-  toastOk:{background:"#1a3a22",color:"#6dbf7e",border:"1px solid #2d6640"},
-  toastErr:{background:"#3a1a1a",color:"#e07a5f",border:"1px solid #6a2a2a"},
-  toastWarn:{background:"#2a2010",color:"#D4A853",border:"1px solid #6a5020"},
+  root:{minHeight:"100vh",background:"#1E2023",color:"#E8ECEF",fontFamily:"-apple-system,'Inter',BlinkMacSystemFont,'Segoe UI',sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
+  header:{position:"sticky",top:0,zIndex:20,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 18px",background:"rgba(22,25,28,.98)",borderBottom:"1px solid rgba(255,255,255,.07)",backdropFilter:"blur(10px)"},
+  logoText:{fontSize:16,fontWeight:700,letterSpacing:"0.06em",color:"#FFFFFF"},
+  alertBadge:{background:"rgba(52,199,89,.15)",border:"1px solid rgba(52,199,89,.35)",color:"#34C759",padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:600},
+  toast:{position:"fixed",top:65,left:"50%",transform:"translateX(-50%)",zIndex:200,padding:"10px 20px",borderRadius:10,fontSize:13,fontWeight:600,whiteSpace:"nowrap",boxShadow:"0 4px 24px rgba(0,0,0,.5)"},
+  toastOk:{background:"#1C3A25",color:"#34C759",border:"1px solid rgba(52,199,89,.4)"},
+  toastErr:{background:"#3A1C1C",color:"#FF453A",border:"1px solid rgba(255,69,58,.4)"},
+  toastWarn:{background:"#3A2E1C",color:"#FF9F0A",border:"1px solid rgba(255,159,10,.4)"},
   main:{flex:1,overflowY:"auto",paddingBottom:80},
-  page:{padding:"14px 14px 8px"},
-  card:{background:"rgba(255,255,255,.03)",border:"1px solid rgba(212,168,83,.12)",borderRadius:12,padding:"14px 12px",marginBottom:10},
-  cardTitle:{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",marginBottom:10,opacity:.8},
-  label:{fontSize:10,color:"#8a7a68",letterSpacing:"0.08em",textTransform:"uppercase"},
-  select:{background:"#1e1a14",border:"1px solid rgba(212,168,83,.2)",borderRadius:8,color:"#e8ddd0",padding:"11px 10px",fontSize:14,width:"100%",outline:"none",fontFamily:"Georgia,serif",appearance:"none"},
-  input:{background:"#1e1a14",border:"1px solid rgba(212,168,83,.2)",borderRadius:8,color:"#e8ddd0",padding:"11px 10px",fontSize:14,width:"100%",outline:"none",boxSizing:"border-box",fontFamily:"Georgia,serif"},
+  page:{padding:"16px 14px 8px"},
+  card:{background:"#272B2F",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,padding:"16px 14px",marginBottom:10,boxShadow:"0 2px 8px rgba(0,0,0,.25)"},
+  cardTitle:{fontSize:11,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",color:"#8A9BB0",marginBottom:12},
+  label:{fontSize:11,color:"#8A9BB0",letterSpacing:"0.03em",fontWeight:500},
+  select:{background:"#1A1D20",border:"1px solid rgba(255,255,255,.12)",borderRadius:9,color:"#E8ECEF",padding:"11px 12px",fontSize:14,width:"100%",outline:"none",appearance:"none",transition:"border-color .15s"},
+  input:{background:"#1A1D20",border:"1px solid rgba(255,255,255,.12)",borderRadius:9,color:"#E8ECEF",padding:"11px 12px",fontSize:14,width:"100%",outline:"none",boxSizing:"border-box",transition:"border-color .15s"},
   numInput:{MozAppearance:"textfield",WebkitAppearance:"none",appearance:"none"},
-  resultBox:{background:"rgba(30,24,16,.9)",border:"1px solid rgba(212,168,83,.3)",borderRadius:12,padding:"14px",marginBottom:12},
-  rendBar:{height:6,background:"rgba(255,255,255,.06)",borderRadius:3,overflow:"hidden"},
-  rendFill:{height:"100%",background:"linear-gradient(90deg,#8B5E2A,#D4A853)",borderRadius:3,transition:"width .4s"},
-  hint:{textAlign:"center",color:"#5a4a3a",fontSize:13,padding:"16px 0"},
-  btnBig:{width:"100%",padding:"14px",fontSize:14,fontWeight:700,background:"linear-gradient(135deg,#8B5E2A,#D4A853)",color:"#141210",border:"none",borderRadius:10,cursor:"pointer",letterSpacing:"0.06em",fontFamily:"Georgia,serif",boxShadow:"0 4px 16px rgba(212,168,83,.2)",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8},
-  btnDis:{opacity:.3,cursor:"not-allowed"},
-  btnSmall:{padding:"8px 14px",fontSize:12,border:"1px solid rgba(212,168,83,.2)",background:"rgba(212,168,83,.06)",color:"#D4A853",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
-  btnRefresh:{padding:"8px 14px",fontSize:12,background:"rgba(255,255,255,.03)",color:"#8a7a68",border:"1px solid rgba(255,255,255,.06)",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
-  btnExport:{padding:"9px",fontSize:12,background:"rgba(212,168,83,.06)",color:"#D4A853",border:"1px solid rgba(212,168,83,.25)",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
-  btnDel:{padding:"9px 12px",fontSize:13,background:"rgba(200,80,60,.05)",color:"#e07a5f",border:"1px solid rgba(200,80,60,.2)",borderRadius:7,cursor:"pointer"},
-  nav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,zIndex:20,display:"flex",background:"rgba(8,6,4,.98)",borderTop:"1px solid rgba(212,168,83,.15)",backdropFilter:"blur(12px)",paddingBottom:"env(safe-area-inset-bottom,0px)"},
-  navBtn:{flex:1,padding:"10px 2px 8px",display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"transparent",border:"none",color:"#4a3a2a",cursor:"pointer"},
-  navBtnActive:{color:"#D4A853"},
-  navIcon:{fontSize:16},
-  navLabel:{fontSize:8,letterSpacing:"0.04em",textTransform:"uppercase",fontFamily:"Georgia,serif"},
-  pre:{background:"#0a0806",border:"1px solid rgba(212,168,83,.12)",borderRadius:6,padding:"10px",fontSize:10,color:"#a09070",overflowX:"auto",lineHeight:1.7,marginTop:8,fontFamily:"monospace",whiteSpace:"pre-wrap",wordBreak:"break-all"},
-  spinner:{width:16,height:16,border:"2px solid rgba(0,0,0,.2)",borderTop:"2px solid #141210",borderRadius:"50%",animation:"spin .8s linear infinite"},
+  resultBox:{background:"#1F2D22",border:"1px solid rgba(52,199,89,.2)",borderRadius:12,padding:"16px",marginBottom:12},
+  rendBar:{height:5,background:"rgba(255,255,255,.08)",borderRadius:3,overflow:"hidden"},
+  rendFill:{height:"100%",background:"linear-gradient(90deg,#1A5C35,#34C759)",borderRadius:3,transition:"width .4s"},
+  hint:{textAlign:"center",color:"#4A5568",fontSize:13,padding:"20px 0"},
+  btnBig:{width:"100%",padding:"14px",fontSize:14,fontWeight:600,background:"#2D6A4F",color:"#FFFFFF",border:"none",borderRadius:10,cursor:"pointer",letterSpacing:"0.02em",boxShadow:"0 2px 12px rgba(45,106,79,.35)",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8,transition:"opacity .15s"},
+  btnDis:{opacity:.35,cursor:"not-allowed"},
+  btnSmall:{padding:"8px 14px",fontSize:12,fontWeight:500,border:"1px solid rgba(255,255,255,.12)",background:"rgba(255,255,255,.05)",color:"#B0BEC5",borderRadius:8,cursor:"pointer"},
+  btnRefresh:{padding:"8px 14px",fontSize:12,background:"rgba(255,255,255,.04)",color:"#8A9BB0",border:"1px solid rgba(255,255,255,.07)",borderRadius:8,cursor:"pointer"},
+  btnExport:{padding:"9px",fontSize:12,background:"rgba(52,199,89,.08)",color:"#34C759",border:"1px solid rgba(52,199,89,.25)",borderRadius:8,cursor:"pointer",fontWeight:500},
+  btnDel:{padding:"9px 12px",fontSize:13,background:"rgba(255,69,58,.06)",color:"#FF453A",border:"1px solid rgba(255,69,58,.2)",borderRadius:8,cursor:"pointer"},
+  nav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,zIndex:20,display:"flex",background:"rgba(22,25,28,.98)",borderTop:"1px solid rgba(255,255,255,.07)",backdropFilter:"blur(12px)",paddingBottom:"env(safe-area-inset-bottom,0px)"},
+  navBtn:{flex:1,padding:"11px 2px 9px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,background:"transparent",border:"none",color:"#4A5568",cursor:"pointer",transition:"color .15s"},
+  navBtnActive:{color:"#34C759"},
+  navIcon:{fontSize:18},
+  navLabel:{fontSize:9,letterSpacing:"0.05em",textTransform:"uppercase",fontWeight:500},
+  pre:{background:"#141618",border:"1px solid rgba(255,255,255,.07)",borderRadius:8,padding:"12px",fontSize:10,color:"#8A9BB0",overflowX:"auto",lineHeight:1.75,marginTop:8,fontFamily:"'SF Mono','Fira Code',monospace",whiteSpace:"pre-wrap",wordBreak:"break-all"},
+  spinner:{width:16,height:16,border:"2px solid rgba(255,255,255,.15)",borderTop:"2px solid #FFFFFF",borderRadius:"50%",animation:"spin .8s linear infinite"},
 };
