@@ -153,6 +153,7 @@ export default function App(){
   const [freeForm,setFree]=useState(initCube);
   const [freeHistory,setFreeHist]=useState(()=>JSON.parse(localStorage.getItem("cube_history")||"[]"));
   const [freeExp,setFreeExp]=useState({});
+  const [freeSub,setFreeSub]=useState(false);
   const [exportedSet]=useState(()=>new Set(JSON.parse(localStorage.getItem("exported_ids")||"[]")));
 
   const poll=useRef(null);
@@ -336,7 +337,8 @@ export default function App(){
   const freeRes=calculParUnite(freeForm);
   const freeOk=freeRes&&freeForm.produit&&freeForm.essence&&freeForm.qualite;
   const addFree=async()=>{
-    if(!freeOk)return;
+    if(!freeOk||freeSub)return;
+    setFreeSub(true);
     const entry={
       id:"LIBRE-"+Date.now().toString(36).toUpperCase().slice(-6),
       type:"libre", date:fmtDate(),
@@ -385,6 +387,7 @@ export default function App(){
     const nh=[entry,...freeHistory];
     setFreeHist(nh); localStorage.setItem("cube_history",JSON.stringify(nh));
     showToast("Charge cubée et sauvegardée ✓"); setFree(initCube);
+    setFreeSub(false);
   };
   const exportFree=async(e)=>{
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
@@ -814,8 +817,8 @@ export default function App(){
           })()}
           {!freeRes&&<div style={S.hint}>Remplis les champs pour calculer</div>}
 
-          <button style={{...S.btnBig,...(!freeOk?S.btnDis:{})}} onClick={addFree} disabled={!freeOk}>
-            Cuber et sauvegarder dans l'historique
+          <button style={{...S.btnBig,...(!freeOk||freeSub?S.btnDis:{})}} onClick={addFree} disabled={!freeOk||freeSub}>
+            {freeSub?<Spinner/>:"Cuber et sauvegarder dans l'historique"}
           </button>
 
           {/* Historique local récent */}
