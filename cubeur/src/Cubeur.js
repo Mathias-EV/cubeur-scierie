@@ -8,19 +8,52 @@ const APPS_SCRIPT_URL_KEY = "cubeur_script_url";
 const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau"];
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
 const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
-const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"" };
+const UNITES   = ["m³","m²","mL"];
+
+// unite par défaut = m³
+const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³" };
 const initCmd   = { client:"",dateLivraison:"",notes:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const round=(n,d=6)=>Math.round(n*10**d)/10**d;
 const pct=(n)=>(n*100).toFixed(1)+" %";
-const m3f=(n)=>parseFloat(n).toFixed(4)+" m³";
+const m3f=(n,u="m³")=>parseFloat(n).toFixed(4)+" "+(u||"m³");
 const genId=()=>"CMD-"+Date.now().toString(36).toUpperCase().slice(-6);
 const today=()=>new Date().toISOString().split("T")[0];
 const fmtDate=()=>new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
 const prodId=(cmdId,idx)=>`${cmdId}-P${idx+1}`;
 
+// ─── CALCUL selon unité ───────────────────────────────────────────────────────
+// Retourne { volUnit, volCharge, rend, perte, unite }
+// Pour m² : volUnit = surface unitaire (la×lo), volCharge = surface totale
+// Pour mL : volUnit = longueur unitaire (lo),   volCharge = linéaire total
+function calculParUnite(p){
+  const ep=parseFloat(p.epaisseur)/1000;
+  const la=parseFloat(p.largeur)/1000;
+  const lo=parseFloat(p.longueur);
+  const nb=parseFloat(p.nbUnites);
+  const vg=parseFloat(p.volumeGrume);
+  const unite=p.unite||"m³";
+
+  let vu=null, vc=null;
+  if(unite==="m³"){
+    if(!ep||!la||!lo||!nb) return null;
+    vu=round(ep*la*lo,6); vc=round(vu*nb,4);
+  } else if(unite==="m²"){
+    if(!la||!lo||!nb) return null;
+    vu=round(la*lo,6); vc=round(vu*nb,4);
+  } else if(unite==="mL"){
+    if(!lo||!nb) return null;
+    vu=round(lo,6); vc=round(vu*nb,4);
+  }
+  if(vu===null) return null;
+  const rend=(unite==="m³"&&vg>0)?round(vc/vg,4):null;
+  const perte=rend!=null?round(1-rend,4):null;
+  return { volUnit:vu, volCharge:vc, rend, perte, unite };
+}
+
+// Calcul cubage libre (m³ uniquement)
 function calcul(f){
   const ep=parseFloat(f.epaisseur)/1000, la=parseFloat(f.largeur)/1000,
         lo=parseFloat(f.longueur), nb=parseFloat(f.nbUnites), vg=parseFloat(f.volumeGrume);
@@ -42,6 +75,23 @@ function Row3({children}){ return <div style={{display:"grid",gridTemplateColumn
 function Sel({value,onChange,opts,ph="— choisir —"}){ return <select style={S.select} value={value} onChange={onChange}><option value="">{ph}</option>{opts.map(o=><option key={o} value={o}>{o}</option>)}</select>; }
 function Inp({value,onChange,ph,type="text",min,step,style}){ return <input type={type} style={{...S.input,...style}} value={value} onChange={onChange} placeholder={ph} min={min} step={step}/>; }
 function Num({value,onChange,ph}){ return <input style={{...S.input,...S.numInput}} type="text" inputMode="decimal" value={value} onChange={onChange} placeholder={ph}/>; }
+
+// Sélecteur d'unité — boutons m³ / m² / mL
+function UniteSel({value,onChange}){
+  return <div style={{display:"flex",gap:6}}>
+    {UNITES.map(u=>(
+      <button key={u} type="button" onClick={()=>onChange(u)}
+        style={{flex:1,padding:"9px 4px",fontSize:13,fontWeight:700,fontFamily:"Georgia,serif",
+          borderRadius:7,cursor:"pointer",transition:"all 0.15s",
+          background:value===u?"linear-gradient(135deg,#8B5E2A,#D4A853)":"rgba(212,168,83,0.06)",
+          color:value===u?"#141210":"#D4A853",
+          border:value===u?"none":"1px solid rgba(212,168,83,0.2)"}}>
+        {u}
+      </button>
+    ))}
+  </div>;
+}
+
 function Card({title,children,accent,style}){ return <div style={{...S.card,...(accent?{borderColor:accent}:{}),...(style||{})}}>{title&&<div style={S.cardTitle}>{title}</div>}{children}</div>; }
 function Badge({status}){
   const map={attente:["#2a1f0a","#D4A853"],production:["#0a1f2a","#5bb8d4"],valide:["#0a2a15","#6dbf7e"],annule:["#2a0a0a","#e07a5f"]};
@@ -54,35 +104,42 @@ function Spinner(){ return <div style={S.spinner}/>; }
 function Mini({label,value,color}){ return <div style={{textAlign:"center"}}><div style={{fontSize:9,color:"#6a5a4a",textTransform:"uppercase",marginBottom:2}}>{label}</div><div style={{fontSize:11,fontWeight:700,color:color||"#e8ddd0"}}>{value}</div></div>; }
 function RItem({label,value,big,color}){ return <div><div style={{fontSize:10,color:"#6a5a4a",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{label}</div><div style={{fontSize:big?18:14,fontWeight:big?700:600,color:color||"#e8ddd0"}}>{value}</div></div>; }
 
-// ─── APP PRINCIPALE ───────────────────────────────────────────────────────────
+// Affichage résumé dimensionnel selon unité
+function dimLabel(l){
+  const u=l.unite||"m³";
+  if(u==="m³") return `${l.epaisseur||"?"}×${l.largeur||"?"}mm · ${l.longueur||"?"}m · ${l.quantite||"?"}u.`;
+  if(u==="m²") return `${l.largeur||"?"}mm · ${l.longueur||"?"}m · ${l.quantite||"?"}u.`;
+  return `${l.longueur||"?"}m · ${l.quantite||"?"}u.`;
+}
+
+// ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState("commande");
   const [scriptUrl,setScriptUrl]=useState(()=>localStorage.getItem(APPS_SCRIPT_URL_KEY)||"");
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
-  // ── État commande ──
+  // ── Commande ──
   const [form,setForm]=useState(initCmd);
   const [submitting,setSub]=useState(false);
   const [confirmDel,setConfirmDel]=useState(null);
   const [deleting,setDeleting]=useState(false);
 
-  // ── État "à réaliser" ──
+  // ── À réaliser ──
   const [commandes,setCmd]=useState([]);
   const [loading,setLoading]=useState(false);
   const [expand,setExpand]=useState(null);
   const cubeRef=useRef({});
   const [,forceRender]=useState(0);
   const cube=cubeRef.current;
-  const setCube=(updater)=>{
-    cubeRef.current=typeof updater==="function"?updater(cubeRef.current):updater;
-    forceRender(v=>v+1);
-  };
+  const setCube=(updater)=>{ cubeRef.current=typeof updater==="function"?updater(cubeRef.current):updater; forceRender(v=>v+1); };
 
-  // ── État historique ──
-  const [histCmds,setHistCmds]=useState(()=>JSON.parse(localStorage.getItem("historique_cmds")||"[]"));
+  // ── Historique COMMUN (depuis Sheet) ──
+  const [histCmds,setHistCmds]=useState([]);
+  const [histLoading,setHistLoading]=useState(false);
+  const [histDetail,setHistDetail]=useState(null); // commande ouverte en détail
 
-  // ── État cubage libre ──
+  // ── Cubage libre ──
   const [freeForm,setFree]=useState(initCube);
   const [freeHistory,setFreeHist]=useState(()=>JSON.parse(localStorage.getItem("cube_history")||"[]"));
   const [freeExp,setFreeExp]=useState({});
@@ -99,11 +156,20 @@ export default function App(){
       const r=await fetch(`${scriptUrl}?action=getCommandes&t=${Date.now()}`);
       const d=await r.json();
       if(d.commandes)setCmd(d.commandes);
-    }catch(e){
-      const loc=JSON.parse(localStorage.getItem("all_commandes")||"[]");
-      if(loc.length)setCmd(loc);
-    }
+    }catch(e){}
     if(!silent)setLoading(false);
+  },[scriptUrl]);
+
+  // ── Charger historique COMMUN depuis Sheet ──
+  const loadHist=useCallback(async()=>{
+    if(!scriptUrl)return;
+    setHistLoading(true);
+    try{
+      const r=await fetch(`${scriptUrl}?action=getHistorique&t=${Date.now()}`);
+      const d=await r.json();
+      if(d.historique)setHistCmds(d.historique);
+    }catch(e){}
+    setHistLoading(false);
   },[scriptUrl]);
 
   useEffect(()=>{ load(); poll.current=setInterval(()=>load(true),30000); return()=>clearInterval(poll.current); },[load]);
@@ -113,6 +179,7 @@ export default function App(){
   // ─────────────────────────────────────────────────────────────────────────────
   const sf=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
   const sl=(i,f)=>e=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],[f]:e.target.value};return{...p,lignes:ls};});
+  const slv=(i,v)=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v};return{...p,lignes:ls};});
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
   const formValid=form.client&&form.dateLivraison&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
@@ -122,15 +189,15 @@ export default function App(){
     setSub(true);
     const id=genId(), dc=fmtDate();
     const rows=form.lignes.map((l,i)=>[
-      i===0?id:"", form.client, l.produit,l.essence,l.qualite,
-      l.epaisseur,l.largeur,l.longueur,l.quantite,
-      form.dateLivraison, i===0?form.notes:"", "attente", i===0?dc:"", prodId(id,i)
+      i===0?id:"", form.client, l.produit, l.essence, l.qualite,
+      l.epaisseur, l.largeur, l.longueur, l.quantite,
+      form.dateLivraison, i===0?form.notes:"", "attente", i===0?dc:"",
+      prodId(id,i), l.unite||"m³"   // col 15 = unité
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
       setForm(initCmd);
       showToast(`Commande ${id} envoyée ✓`);
-      // Recharger les commandes après envoi
       setTimeout(()=>load(true),1000);
     }catch(e){showToast("Erreur d'envoi","error");}
     setSub(false);
@@ -154,11 +221,12 @@ export default function App(){
       (cmd.lignes||[]).forEach((l,i)=>{
         const pid=prodId(cmd.id,i);
         lignesMap[pid]={
-          produit:l.produit,essence:l.essence,qualite:l.qualite||"",
-          epaisseur:l.epaisseur||"",largeur:l.largeur||"",longueur:l.longueur||"",
-          nbUnites:l.quantite||"",volumeGrume:"",
-          volUnit:null,volCharge:null,rend:null,perte:null,
-          exporting:false,exported:false,idx:i
+          produit:l.produit, essence:l.essence, qualite:l.qualite||"",
+          epaisseur:l.epaisseur||"", largeur:l.largeur||"", longueur:l.longueur||"",
+          nbUnites:l.quantite||"", volumeGrume:"",
+          unite:l.unite||l.prodId_unite||"m³",  // récupérer l'unité de la commande
+          volUnit:null, volCharge:null, rend:null, perte:null,
+          exporting:false, exported:false, idx:i
         };
       });
       return {...prev,[cmd.id]:lignesMap};
@@ -169,22 +237,19 @@ export default function App(){
     setCube(prev=>{
       const cm={...prev[cmdId]};
       const p={...cm[pid],[field]:value};
-      const ep=parseFloat(field==="epaisseur"?value:p.epaisseur)/1000;
-      const la=parseFloat(field==="largeur"?value:p.largeur)/1000;
-      const lo=parseFloat(field==="longueur"?value:p.longueur);
-      const nb=parseFloat(field==="nbUnites"?value:p.nbUnites);
-      const vg=parseFloat(field==="volumeGrume"?value:p.volumeGrume);
-      if(ep>0&&la>0&&lo>0&&nb>0){
-        p.volUnit=round(ep*la*lo,6); p.volCharge=round(p.volUnit*nb,4);
-        if(vg>0){p.rend=round(p.volCharge/vg,4);p.perte=round(1-p.rend,4);}
-        else{p.rend=null;p.perte=null;}
-      }else{p.volUnit=null;p.volCharge=null;p.rend=null;p.perte=null;}
+      const res=calculParUnite(p);
+      if(res){p.volUnit=res.volUnit;p.volCharge=res.volCharge;p.rend=res.rend;p.perte=res.perte;}
+      else{p.volUnit=null;p.volCharge=null;p.rend=null;p.perte=null;}
       cm[pid]=p;
       return {...prev,[cmdId]:cm};
     });
   };
 
-  const isPret=(p)=>p.nbUnites&&p.epaisseur&&p.largeur&&p.longueur&&p.volumeGrume&&!p.exported&&!p.exporting;
+  const isPret=(p)=>{
+    const u=p.unite||"m³";
+    const hasVol=p.nbUnites&&p.longueur&&(u==="mL"||(u==="m²"&&p.largeur)||(u==="m³"&&p.largeur&&p.epaisseur));
+    return hasVol&&!p.exported&&!p.exporting&&(u!=="m³"||p.volumeGrume);
+  };
 
   const validerProduit=async(cmd,pid)=>{
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
@@ -195,16 +260,20 @@ export default function App(){
     forceRender(v=>v+1);
 
     const date=fmtDate();
-    const ep=parseFloat(p.epaisseur)/1000,la=parseFloat(p.largeur)/1000,
-          lo=parseFloat(p.longueur),nb=parseFloat(p.nbUnites),vg=parseFloat(p.volumeGrume);
-    const vu=round(ep*la*lo,6),vc=round(vu*nb,4);
-    const rend=vg>0?round(vc/vg,4):0,perte=round(1-rend,4);
-    const row=[date,cmd.id,pid,p.produit,p.essence,p.qualite,p.epaisseur,p.largeur,p.longueur,nb,vg,vu,vc,rend,perte];
+    const res=calculParUnite(p);
+    if(!res){showToast("Données incomplètes","error");return;}
+    const {volUnit:vu,volCharge:vc,rend,perte}=res;
+    const vg=parseFloat(p.volumeGrume)||0;
+    const unite=p.unite||"m³";
+
+    const row=[date,cmd.id,pid,p.produit,p.essence,p.qualite,
+      p.epaisseur,p.largeur,p.longueur,p.nbUnites,
+      vg,vu,vc,rend??0,perte??0,unite];
 
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:pid});
       const fresh=cubeRef.current[cmd.id]||{};
-      const updatedCmd={...fresh,[pid]:{...fresh[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte}};
+      const updatedCmd={...fresh,[pid]:{...fresh[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte,unite}};
       const tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
       cubeRef.current={...cubeRef.current,[cmd.id]:updatedCmd};
       forceRender(v=>v+1);
@@ -212,20 +281,22 @@ export default function App(){
       if(tousExportes){
         try{await callScript(scriptUrl,{type:"updateStatut",id:cmd.id,statut:"valide",date});}catch(e){}
         setCmd(c=>c.map(x=>x.id===cmd.id?{...x,statut:"valide"}:x));
+
+        // Sauvegarder historique dans le Sheet (commun)
         const hEntry={
-          id:cmd.id,client:cmd.client,
+          id:cmd.id, client:cmd.client,
           dateLivraison:cmd.dateLivraison||cmd.datelivraison,
-          dateValidation:date,
+          dateValidation:date, notes:cmd.notes||"",
           lignes:Object.values(updatedCmd).sort((a,b)=>a.idx-b.idx).map(p2=>({
             produit:p2.produit,essence:p2.essence,qualite:p2.qualite,
             epaisseur:p2.epaisseur,largeur:p2.largeur,longueur:p2.longueur,
             nbUnites:p2.nbUnites,volumeGrume:p2.volumeGrume,
-            volUnit:p2.volUnit,volCharge:p2.volCharge,rend:p2.rend,perte:p2.perte
+            volUnit:p2.volUnit,volCharge:p2.volCharge,rend:p2.rend,perte:p2.perte,
+            unite:p2.unite||"m³"
           }))
         };
-        const hist=[hEntry,...JSON.parse(localStorage.getItem("historique_cmds")||"[]")];
-        localStorage.setItem("historique_cmds",JSON.stringify(hist));
-        setHistCmds(hist);
+        try{ await callScript(scriptUrl,{type:"saveHistorique",entry:hEntry}); }catch(e){}
+        setHistCmds(h=>[hEntry,...h]);
         showToast(`✓ Commande ${cmd.id} entièrement validée !`);
         setExpand(null);
       }else{
@@ -239,7 +310,7 @@ export default function App(){
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // ONGLET 4 — CUBAGE LIBRE
+  // CUBAGE LIBRE
   // ─────────────────────────────────────────────────────────────────────────────
   const sfree=f=>e=>setFree(p=>({...p,[f]:e.target.value}));
   const freeRes=calcul(freeForm);
@@ -255,7 +326,7 @@ export default function App(){
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
     if(exportedSet.has(String(e.id))){showToast("Déjà exporté !","warn");return;}
     setFreeExp(x=>({...x,[e.id]:true}));
-    const row=[e.date,"","",e.produit,e.essence,e.qualite,e.epaisseur,e.largeur,e.longueur,e.nbUnites,e.volumeGrume,e.volumeUnit,e.volumeCharge,e.rendement,e.perte];
+    const row=[e.date,"","",e.produit,e.essence,e.qualite,e.epaisseur,e.largeur,e.longueur,e.nbUnites,e.volumeGrume,e.volumeUnit,e.volumeCharge,e.rendement,e.perte,"m³"];
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:String(e.id)});
       markExported(String(e.id));
@@ -276,16 +347,12 @@ export default function App(){
   return (
     <div style={S.root}>
       <Toast t={toast}/>
-
-      {/* Header */}
       <header style={S.header}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:"#D4A853",boxShadow:"0 0 8px #D4A853"}}/>
           <span style={S.logoText}>SCIERIE</span>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          {cmdAtt.length>0&&<div style={S.alertBadge}>{cmdAtt.length} en attente</div>}
-        </div>
+        {cmdAtt.length>0&&<div style={S.alertBadge}>{cmdAtt.length} en attente</div>}
       </header>
 
       <main style={S.main}>
@@ -303,16 +370,34 @@ export default function App(){
 
           {form.lignes.map((lg,i)=>(
             <Card key={i} title={`Produit ${form.lignes.length>1?i+1:""}`} accent={i===0?"rgba(212,168,83,.3)":"rgba(212,168,83,.12)"}>
+              {/* Unité en haut bien visible */}
+              <Field label="Unité de mesure" style={{marginBottom:12}}>
+                <UniteSel value={lg.unite||"m³"} onChange={v=>slv(i,v)}/>
+              </Field>
               <Row2 style={{marginBottom:10}}>
                 <Field label="Produit"><Sel value={lg.produit} onChange={sl(i,"produit")} opts={PRODUITS}/></Field>
                 <Field label="Essence"><Sel value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
               </Row2>
-              <Field label="Qualité" style={{marginBottom:10}}><Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/></Field>
-              <Row3>
-                <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
-                <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
-                <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-              </Row3>
+              <Field label="Qualité" style={{marginBottom:10}}>
+                <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
+              </Field>
+              {/* Dimensions selon unité */}
+              {(lg.unite||"m³")==="m³"&&(
+                <Row3>
+                  <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
+                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                  <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+                </Row3>
+              )}
+              {(lg.unite||"m³")==="m²"&&(
+                <Row2>
+                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                  <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+                </Row2>
+              )}
+              {(lg.unite||"m³")==="mL"&&(
+                <Field label="Longueur (m)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+              )}
               <Field label="Quantité (unités)" style={{marginTop:10}}>
                 <Num value={lg.quantite} onChange={sl(i,"quantite")} ph="100"/>
               </Field>
@@ -323,20 +408,15 @@ export default function App(){
           <button style={{...S.btnBig,background:"rgba(212,168,83,.08)",color:"#D4A853",border:"1px solid rgba(212,168,83,.3)",marginBottom:10}} onClick={addL}>
             + Ajouter un produit
           </button>
-
           <Card title="Notes">
             <textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={form.notes} onChange={sf("notes")} placeholder="Instructions particulières..."/>
           </Card>
-
           <button style={{...S.btnBig,...(!formValid||submitting?S.btnDis:{})}} onClick={envoyer} disabled={!formValid||submitting}>
             {submitting?<Spinner/>:"📤 Envoyer la commande"}
           </button>
 
-          {/* Liste des commandes existantes */}
           {commandes.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(212,168,83,.15)"}}>
-              Commandes envoyées
-            </div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(212,168,83,.15)"}}>Commandes envoyées</div>
             <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
             {commandes.map(c=>(
               <Card key={c.id}>
@@ -357,12 +437,11 @@ export default function App(){
                     {(c.lignes||[]).map((l,i)=>(
                       <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
                         • <strong style={{color:"#D4A853"}}>{l.produit}</strong>{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
-                        {l.epaisseur&&<span style={{color:"#6a5a4a",fontFamily:"monospace"}}> — {l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.quantite}u.</span>}
+                        <span style={{color:"#5bb8d4",fontSize:11}}> [{l.unite||"m³"}]</span>
+                        <span style={{color:"#6a5a4a",fontFamily:"monospace",fontSize:11}}> — {dimLabel(l)}</span>
                       </div>
                     ))}
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6a5a4a",marginTop:6}}>
-                      <span>Livraison : <strong style={{color:"#c4b09a"}}>{c.dateLivraison||c.datelivraison}</strong></span>
-                    </div>
+                    <div style={{fontSize:12,color:"#6a5a4a",marginTop:6}}>Livraison : <strong style={{color:"#c4b09a"}}>{c.dateLivraison||c.datelivraison}</strong></div>
                   </>
                 )}
               </Card>
@@ -401,10 +480,16 @@ export default function App(){
                   {(cmd.lignes||[]).map((l,i)=>{
                     const pid=prodId(cmd.id,i);
                     const exp=cubeCmd?.[pid]?.exported;
+                    const u=l.unite||"m³";
                     return (
                       <div key={i} style={{fontSize:12,marginBottom:3,padding:"4px 8px",borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center",background:exp?"rgba(109,191,126,.06)":"rgba(255,255,255,.02)",border:`1px solid ${exp?"rgba(109,191,126,.2)":"transparent"}`}}>
-                        <span><span style={{color:exp?"#6dbf7e":"#D4A853",fontWeight:700}}>{exp?"✓ ":""}{l.produit}</span><span style={{color:"#8a7a68"}}>{l.essence?` · ${l.essence}`:""}</span>{l.epaisseur&&<span style={{color:"#5a4a3a",fontFamily:"monospace"}}> {l.epaisseur}×{l.largeur}mm·{l.longueur}m·{l.quantite}u</span>}</span>
-                        <span style={{fontSize:10,color:"#5bb8d4",fontFamily:"monospace",background:"rgba(91,184,212,.08)",padding:"2px 6px",borderRadius:4}}>{pid.split("-").slice(-1)[0]}</span>
+                        <span>
+                          <span style={{color:exp?"#6dbf7e":"#D4A853",fontWeight:700}}>{exp?"✓ ":""}{l.produit}</span>
+                          <span style={{color:"#8a7a68"}}>{l.essence?` · ${l.essence}`:""}</span>
+                          <span style={{color:"#5bb8d4",fontSize:10}}> [{u}]</span>
+                          <span style={{color:"#5a4a3a",fontFamily:"monospace",fontSize:11}}> {dimLabel(l)}</span>
+                        </span>
+                        <span style={{fontSize:10,color:"#5bb8d4",fontFamily:"monospace",background:"rgba(91,184,212,.08)",padding:"2px 5px",borderRadius:4}}>{pid.split("-").slice(-1)[0]}</span>
                       </div>
                     );
                   })}
@@ -418,46 +503,57 @@ export default function App(){
                   <div style={{marginTop:14,borderTop:"1px solid rgba(91,184,212,.15)",paddingTop:14}}>
                     {Object.entries(cubeCmd).sort((a,b)=>a[1].idx-b[1].idx).map(([pid,p])=>{
                       const pret=isPret(p);
+                      const u=p.unite||"m³";
                       return (
                         <div key={pid} style={{background:p.exported?"rgba(109,191,126,.04)":"rgba(255,255,255,.02)",border:`1px solid ${p.exported?"rgba(109,191,126,.3)":"rgba(212,168,83,.15)"}`,borderRadius:10,padding:"12px",marginBottom:12}}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                             <div style={{fontSize:12,fontWeight:700,color:p.exported?"#6dbf7e":"#D4A853",textTransform:"uppercase",letterSpacing:"0.07em"}}>
-                              {p.exported?"✓ ":""}{p.produit} · {p.essence}{p.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {p.qualite}</span>}
+                              {p.exported?"✓ ":""}{p.produit} · {p.essence}
+                              {p.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {p.qualite}</span>}
+                              <span style={{color:"#5bb8d4",fontSize:11,fontWeight:400,textTransform:"none",letterSpacing:0}}> [{u}]</span>
                             </div>
                             <span style={{fontSize:10,color:"#5bb8d4",fontFamily:"monospace",background:"rgba(91,184,212,.08)",padding:"2px 6px",borderRadius:4}}>{pid}</span>
                           </div>
                           {p.exported?(
                             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
-                              <Mini label="Grume" value={m3f(parseFloat(p.volumeGrume)||0)} color="#a09080"/>
-                              <Mini label="Vol." value={m3f(p.volCharge||0)} color="#D4A853"/>
-                              <Mini label="Rend." value={p.rend!=null?pct(p.rend):"—"} color="#6dbf7e"/>
-                              <Mini label="Perte" value={p.perte!=null?pct(p.perte):"—"} color="#e07a5f"/>
+                              {u==="m³"&&<Mini label="Grume" value={m3f(parseFloat(p.volumeGrume)||0)} color="#a09080"/>}
+                              <Mini label={u==="mL"?"Linéaire":"Volume/Surface"} value={m3f(p.volCharge||0,u)} color="#D4A853"/>
+                              {u==="m³"&&p.rend!=null&&<Mini label="Rend." value={pct(p.rend)} color="#6dbf7e"/>}
+                              {u==="m³"&&p.perte!=null&&<Mini label="Perte" value={pct(p.perte)} color="#e07a5f"/>}
                             </div>
                           ):(
                             <>
-                              <Row3>
+                              {/* Dimensions selon unité */}
+                              {u==="m³"&&<Row3>
                                 <Field label="Ép. mm"><Num value={p.epaisseur} onChange={e=>setField(cmd.id,pid,"epaisseur",e.target.value)} ph="27"/></Field>
                                 <Field label="Larg. mm"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
                                 <Field label="Long. m"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
-                              </Row3>
+                              </Row3>}
+                              {u==="m²"&&<Row2>
+                                <Field label="Larg. mm"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
+                                <Field label="Long. m"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
+                              </Row2>}
+                              {u==="mL"&&<Field label="Longueur (m)"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>}
+
                               <Row2 style={{marginTop:10}}>
                                 <Field label="Nb unités prod."><Num value={p.nbUnites} onChange={e=>setField(cmd.id,pid,"nbUnites",e.target.value)} ph={p.nbUnites||"200"}/></Field>
-                                <Field label="Vol. grume (m³)"><Num value={p.volumeGrume} onChange={e=>setField(cmd.id,pid,"volumeGrume",e.target.value)} ph="2.5"/></Field>
+                                {u==="m³"&&<Field label="Vol. grume (m³)"><Num value={p.volumeGrume} onChange={e=>setField(cmd.id,pid,"volumeGrume",e.target.value)} ph="2.5"/></Field>}
                               </Row2>
+
                               {p.volCharge!=null&&(
-                                <div style={{marginTop:8,background:"rgba(212,168,83,.04)",borderRadius:8,padding:"8px 10px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
-                                  <Mini label="Vol. unit." value={m3f(p.volUnit)} color="#e8ddd0"/>
-                                  <Mini label="Vol. charge" value={m3f(p.volCharge)} color="#D4A853"/>
-                                  <Mini label="Rendement" value={p.rend!=null?pct(p.rend):"—"} color="#6dbf7e"/>
-                                  <Mini label="Perte" value={p.perte!=null?pct(p.perte):"—"} color="#e07a5f"/>
+                                <div style={{marginTop:8,background:"rgba(212,168,83,.04)",borderRadius:8,padding:"8px 10px",display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":"1fr 1fr",gap:6}}>
+                                  <Mini label="Vol. unit." value={m3f(p.volUnit,u)} color="#e8ddd0"/>
+                                  <Mini label={u==="mL"?"Linéaire total":u==="m²"?"Surface totale":"Vol. charge"} value={m3f(p.volCharge,u)} color="#D4A853"/>
+                                  {u==="m³"&&<Mini label="Rendement" value={p.rend!=null?pct(p.rend):"—"} color="#6dbf7e"/>}
+                                  {u==="m³"&&<Mini label="Perte" value={p.perte!=null?pct(p.perte):"—"} color="#e07a5f"/>}
                                 </div>
                               )}
-                              {p.volCharge!=null&&p.rend!=null&&<div style={{...S.rendBar,marginTop:6}}><div style={{...S.rendFill,width:pct(p.rend)}}/></div>}
+                              {u==="m³"&&p.volCharge!=null&&p.rend!=null&&<div style={{...S.rendBar,marginTop:6}}><div style={{...S.rendFill,width:pct(p.rend)}}/></div>}
+
                               <button style={{...S.btnBig,...(!pret?S.btnDis:{}),marginTop:10,marginBottom:0,fontSize:13,padding:"11px",background:pret?"linear-gradient(135deg,#0a1f0a,#6dbf7e)":"rgba(255,255,255,.05)",color:pret?"#fff":"#4a3a2a",boxShadow:pret?"0 4px 12px rgba(109,191,126,.2)":"none"}}
                                 onClick={()=>validerProduit(cmd,pid)} disabled={!pret||p.exporting}>
                                 {p.exporting?<Spinner/>:`✓ Valider ${pid}`}
                               </button>
-                              {!pret&&<div style={{textAlign:"center",fontSize:10,color:"#6a5a4a",marginTop:2}}>Remplis dimensions + nb unités + vol. grume</div>}
                             </>
                           )}
                         </div>
@@ -482,38 +578,105 @@ export default function App(){
           </>}
         </div>}
 
-        {/* ══ HISTORIQUE ══ */}
+        {/* ══ HISTORIQUE COMMUN ══ */}
         {tab==="historique"&&<div style={S.page}>
-          {histCmds.length===0?<Empty icon="📚" text="Aucune commande validée pour l'instant"/>:<>
-            <div style={{color:"#8a7a68",fontSize:12,marginBottom:14}}>{histCmds.length} commande{histCmds.length>1?"s":""} réalisée{histCmds.length>1?"s":""}</div>
-            {histCmds.map(h=>(
-              <div key={h.id} style={{...S.card,borderColor:"rgba(109,191,126,.2)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                  <div><div style={{fontSize:11,color:"#5bb8d4"}}>{h.id}</div><div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{h.client}</div></div>
-                  <span style={{fontSize:11,color:"#6dbf7e",background:"rgba(109,191,126,.1)",padding:"3px 8px",borderRadius:12,border:"1px solid rgba(109,191,126,.2)"}}>✓ Réalisée</span>
-                </div>
-                <div style={{fontSize:12,color:"#6a5a4a",marginBottom:8}}>📅 <strong style={{color:"#c4b09a"}}>{h.dateLivraison}</strong> · Validée {h.dateValidation}</div>
-                {(h.lignes||[]).map((l,i)=>(
-                  <div key={i} style={{background:"rgba(109,191,126,.03)",border:"1px solid rgba(109,191,126,.1)",borderRadius:7,padding:"8px 10px",marginBottom:6}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"#D4A853",marginBottom:4}}>{l.produit} · {l.essence}{l.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {l.qualite}</span>}</div>
-                    <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:6}}>{l.epaisseur}×{l.largeur}mm · {l.longueur}m · {l.nbUnites}u.</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
-                      <Mini label="Grume" value={m3f(l.volumeGrume||0)} color="#a09080"/>
-                      <Mini label="Vol." value={m3f(l.volCharge||0)} color="#D4A853"/>
-                      <Mini label="Rend." value={l.rend!=null?pct(l.rend):"—"} color="#6dbf7e"/>
-                      <Mini label="Perte" value={l.perte!=null?pct(l.perte):"—"} color="#e07a5f"/>
-                    </div>
+          {/* Détail d'une commande — overlay */}
+          {histDetail&&(
+            <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.85)",overflowY:"auto",padding:"20px 14px"}}>
+              <div style={{maxWidth:480,margin:"0 auto"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <div>
+                    <div style={{fontSize:11,color:"#5bb8d4"}}>{histDetail.id}</div>
+                    <div style={{fontWeight:700,color:"#e8ddd0",fontSize:18}}>{histDetail.client}</div>
                   </div>
-                ))}
-                {h.lignes&&h.lignes.length>1&&<div style={{textAlign:"right",fontSize:12,color:"#D4A853",marginTop:4,fontWeight:700}}>Total : {m3f(h.lignes.reduce((s,l)=>s+(l.volCharge||0),0))}</div>}
+                  <button style={{...S.btnSmall,fontSize:16,padding:"6px 14px"}} onClick={()=>setHistDetail(null)}>✕</button>
+                </div>
+                <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14}}>
+                  📅 Livraison : <strong style={{color:"#c4b09a"}}>{histDetail.dateLivraison}</strong>
+                  {" · "}Validée le <strong style={{color:"#c4b09a"}}>{histDetail.dateValidation}</strong>
+                  {histDetail.notes&&<div style={{marginTop:4,color:"#8a7a68",fontStyle:"italic"}}>"{histDetail.notes}"</div>}
+                </div>
+                {/* Totaux globaux */}
+                {histDetail.lignes&&(()=>{
+                  const m3lines=histDetail.lignes.filter(l=>(l.unite||"m³")==="m³");
+                  const m2lines=histDetail.lignes.filter(l=>l.unite==="m²");
+                  const mLlines=histDetail.lignes.filter(l=>l.unite==="mL");
+                  return <div style={{background:"rgba(212,168,83,.06)",borderRadius:10,padding:"10px 12px",marginBottom:14,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                    {m3lines.length>0&&<Stat label="Total m³" value={m3f(m3lines.reduce((s,l)=>s+(l.volCharge||0),0))} color="#D4A853"/>}
+                    {m2lines.length>0&&<Stat label="Total m²" value={m3f(m2lines.reduce((s,l)=>s+(l.volCharge||0),0),"m²")} color="#5bb8d4"/>}
+                    {mLlines.length>0&&<Stat label="Total mL" value={m3f(mLlines.reduce((s,l)=>s+(l.volCharge||0),0),"mL")} color="#9A7A54"/>}
+                  </div>;
+                })()}
+                {(histDetail.lignes||[]).map((l,i)=>{
+                  const u=l.unite||"m³";
+                  return (
+                    <div key={i} style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(212,168,83,.12)",borderRadius:10,padding:"12px",marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <div style={{fontWeight:700,color:"#D4A853",fontSize:13}}>{l.produit} · {l.essence}{l.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {l.qualite}</span>}</div>
+                        <span style={{background:"rgba(91,184,212,.12)",color:"#5bb8d4",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>{u}</span>
+                      </div>
+                      <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:8}}>
+                        {u==="m³"&&`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m · ${l.nbUnites}u.`}
+                        {u==="m²"&&`${l.largeur}mm · ${l.longueur}m · ${l.nbUnites}u.`}
+                        {u==="mL"&&`${l.longueur}m · ${l.nbUnites}u.`}
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":"1fr 1fr",gap:8}}>
+                        {u==="m³"&&<Mini label="Grume" value={m3f(l.volumeGrume||0)} color="#a09080"/>}
+                        <Mini label={u==="mL"?"Linéaire":u==="m²"?"Surface":"Volume"} value={m3f(l.volCharge||0,u)} color="#D4A853"/>
+                        {u==="m³"&&l.rend!=null&&<Mini label="Rendement" value={pct(l.rend)} color="#6dbf7e"/>}
+                        {u==="m³"&&l.perte!=null&&<Mini label="Perte" value={pct(l.perte)} color="#e07a5f"/>}
+                      </div>
+                    </div>
+                  );
+                })}
+                <button style={{...S.btnBig,marginTop:8}} onClick={()=>setHistDetail(null)}>Fermer</button>
               </div>
-            ))}
-          </>}
+            </div>
+          )}
+
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{color:"#8a7a68",fontSize:12}}>{histCmds.length} commande{histCmds.length>1?"s":""} réalisée{histCmds.length>1?"s":""}</div>
+            <button style={S.btnRefresh} onClick={loadHist}>{histLoading?"⏳":"↻ Actualiser"}</button>
+          </div>
+          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#D4A853",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {histCmds.length===0&&!histLoading&&scriptUrl&&<Empty icon="📚" text="Aucune commande validée — appuie sur ↻ pour charger"/>}
+          {histLoading&&<Empty icon="⏳" text="Chargement..."/>}
+
+          {histCmds.map(h=>(
+            <div key={h.id} style={{...S.card,borderColor:"rgba(109,191,126,.2)",cursor:"pointer"}}
+              onClick={()=>setHistDetail(h)}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                <div>
+                  <div style={{fontSize:11,color:"#5bb8d4"}}>{h.id}</div>
+                  <div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{h.client}</div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+                  <span style={{fontSize:11,color:"#6dbf7e",background:"rgba(109,191,126,.1)",padding:"3px 8px",borderRadius:12,border:"1px solid rgba(109,191,126,.2)"}}>✓ Réalisée</span>
+                  <span style={{fontSize:10,color:"#6a5a4a"}}>{h.dateValidation}</span>
+                </div>
+              </div>
+              <div style={{fontSize:12,color:"#6a5a4a",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{h.dateLivraison}</strong></div>
+              {/* Résumé compact */}
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                {(h.lignes||[]).map((l,i)=>(
+                  <span key={i} style={{fontSize:11,color:"#a09080",background:"rgba(255,255,255,.03)",padding:"2px 8px",borderRadius:10,border:"1px solid rgba(212,168,83,.1)"}}>
+                    {l.produit} <span style={{color:"#5bb8d4"}}>[{l.unite||"m³"}]</span>
+                  </span>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:"#6a5a4a"}}>
+                Total : <strong style={{color:"#D4A853"}}>{m3f((h.lignes||[]).filter(l=>(l.unite||"m³")==="m³").reduce((s,l)=>s+(l.volCharge||0),0))}</strong>
+                {(h.lignes||[]).some(l=>l.unite==="m²")&&<span> · <strong style={{color:"#5bb8d4"}}>{m3f((h.lignes||[]).filter(l=>l.unite==="m²").reduce((s,l)=>s+(l.volCharge||0),0),"m²")}</strong></span>}
+                {(h.lignes||[]).some(l=>l.unite==="mL")&&<span> · <strong style={{color:"#9A7A54"}}>{m3f((h.lignes||[]).filter(l=>l.unite==="mL").reduce((s,l)=>s+(l.volCharge||0),0),"mL")}</strong></span>}
+              </div>
+              <div style={{fontSize:10,color:"#5bb8d4",marginTop:6,textAlign:"right"}}>Appuyer pour voir le détail →</div>
+            </div>
+          ))}
         </div>}
 
         {/* ══ CUBAGE LIBRE ══ */}
         {tab==="libre"&&<div style={S.page}>
-          <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14,textAlign:"center"}}>Cubage hors commande — sciage libre</div>
+          <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14,textAlign:"center"}}>Cubage hors commande — sciage libre (m³)</div>
           <Card title="Produit">
             <Row2 style={{marginBottom:12}}>
               <Field label="Produit"><Sel value={freeForm.produit} onChange={sfree("produit")} opts={PRODUITS}/></Field>
@@ -547,7 +710,7 @@ export default function App(){
           ):<div style={S.hint}>Remplis les champs pour calculer</div>}
           <button style={{...S.btnBig,...(!freeOk?S.btnDis:{})}} onClick={addFree} disabled={!freeOk}>Cuber et sauvegarder</button>
           {freeHistory.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(212,168,83,.15)"}}>Historique ({freeHistory.length})</div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(212,168,83,.15)"}}>Historique local ({freeHistory.length})</div>
             {freeHistory.map(e=>(
               <div key={e.id} style={{...S.card,borderColor:exportedSet.has(String(e.id))?"rgba(109,191,126,.2)":"rgba(212,168,83,.12)"}}>
                 <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
@@ -577,10 +740,12 @@ export default function App(){
             </Field>
             {scriptUrl&&<div style={{fontSize:12,color:"#6dbf7e",marginTop:8}}>✓ URL enregistrée</div>}
           </Card>
-          <Card title="Script Apps Script">
+          <Card title="Script Apps Script — Version complète">
             <pre style={S.pre}>{`function doGet(e) {
   var ss = SpreadsheetApp.openById("${SHEET_ID}");
-  if(e.parameter.action === "getCommandes") {
+  var action = e.parameter.action;
+
+  if(action === "getCommandes") {
     var sheet = ss.getSheetByName("Vendeur");
     if(!sheet||sheet.getLastRow()<2) return json({commandes:[]});
     var rows = sheet.getDataRange().getValues();
@@ -600,11 +765,23 @@ export default function App(){
         produit:o["produit"],essence:o["essence"],
         qualite:o["qualite"],epaisseur:o["epaisseur"],
         largeur:o["largeur"],longueur:o["longueur"],
-        quantite:o["quantite"],prodId:o["prodId"]||""
+        quantite:o["quantite"],prodId:o["prodId"]||"",
+        unite:o["unite"]||"m³"
       });
     });
     return json({commandes:order.map(function(id){return map[id];})});
   }
+
+  if(action === "getHistorique") {
+    var sheet = ss.getSheetByName("Historique");
+    if(!sheet||sheet.getLastRow()<2) return json({historique:[]});
+    var data = sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues().flat();
+    var historique = data.map(function(cell){
+      try{ return JSON.parse(cell); }catch(e){ return null; }
+    }).filter(Boolean);
+    return json({historique:historique});
+  }
+
   return json({ok:true});
 }
 
@@ -617,7 +794,7 @@ function doPost(e) {
     if(s.getLastRow()===0)
       s.appendRow(["id","client","produit","essence","qualite",
         "epaisseur","largeur","longueur","quantite",
-        "dateLivraison","notes","statut","dateCreation","prodId"]);
+        "dateLivraison","notes","statut","dateCreation","prodId","unite"]);
     var ids=s.getLastRow()>1
       ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];
     if(ids.indexOf(String(d.id))===-1)
@@ -627,16 +804,13 @@ function doPost(e) {
   if(d.type==="updateStatut"){
     var s=ss.getSheetByName("Vendeur");
     if(s&&s.getLastRow()>1){
-      var lastRow=s.getLastRow();
-      var v=s.getRange(2,1,lastRow-1,13).getValues();
+      var v=s.getRange(2,1,s.getLastRow()-1,13).getValues();
       var inBlock=false;
       for(var i=0;i<v.length;i++){
-        var cellId=String(v[i][0]).trim();
-        if(cellId===String(d.id).trim()){
-          s.getRange(i+2,12).setValue(d.statut); inBlock=true;
-        } else if(inBlock&&cellId===""){
-          s.getRange(i+2,12).setValue(d.statut);
-        } else if(inBlock&&cellId!==""){break;}
+        var cid=String(v[i][0]).trim();
+        if(cid===String(d.id).trim()){s.getRange(i+2,12).setValue(d.statut);inBlock=true;}
+        else if(inBlock&&cid===""){s.getRange(i+2,12).setValue(d.statut);}
+        else if(inBlock&&cid!==""){break;}
       }
     }
   }
@@ -645,7 +819,7 @@ function doPost(e) {
     var s=ss.getSheetByName("Vendeur");
     if(s&&s.getLastRow()>1){
       var v=s.getRange(2,1,s.getLastRow()-1,1).getValues();
-      var start=-1, end=-1;
+      var start=-1,end=-1;
       for(var i=0;i<v.length;i++){
         var c=String(v[i][0]).trim();
         if(c===String(d.id).trim()){start=i+2;end=i+2;}
@@ -661,12 +835,22 @@ function doPost(e) {
     if(s.getLastRow()===0)
       s.appendRow(["Date","Cmd ID","Prod ID","Produit","Essence",
         "Qualité","Ép.mm","Larg.mm","Long.m","Nb unités",
-        "Vol.Grume m³","Vol.Unitaire m³","Vol.Charge m³",
-        "Rendement","Perte"]);
+        "Vol.Grume m³","Vol.Unitaire","Vol.Charge","Rendement","Perte","Unité"]);
     var col3=s.getLastRow()>1
       ?s.getRange(2,3,s.getLastRow()-1,1).getValues().flat().map(String):[];
-    if(col3.indexOf(String(d.id))===-1)
-      s.appendRow(d.row);
+    if(col3.indexOf(String(d.id))===-1) s.appendRow(d.row);
+  }
+
+  if(d.type==="saveHistorique"){
+    var s=ss.getSheetByName("Historique")||ss.insertSheet("Historique");
+    if(s.getLastRow()===0) s.appendRow(["data_json"]);
+    // Anti-doublon sur l'id de commande
+    var existing=s.getLastRow()>1
+      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat():[];
+    var alreadyIn=existing.some(function(cell){
+      try{return JSON.parse(cell).id===d.entry.id;}catch(e){return false;}
+    });
+    if(!alreadyIn) s.appendRow([JSON.stringify(d.entry)]);
   }
 
   return ContentService.createTextOutput(JSON.stringify({ok:true}))
@@ -678,14 +862,16 @@ function json(o){
 }`}</pre>
           </Card>
           <div style={{background:"#1a1510",border:"1px solid rgba(212,168,83,.1)",borderRadius:8,padding:14,fontSize:12,color:"#8a7a68",lineHeight:1.9}}>
-            <strong style={{color:"#D4A853",display:"block",marginBottom:6}}>Extensions → Apps Script → Nouveau déploiement → App Web → Tout le monde → Déployer → copier l'URL</strong>
-            Onglets Sheet : <strong>Vendeur</strong> (commandes) · <strong>Scieur</strong> (cubages)
+            <strong style={{color:"#D4A853",display:"block",marginBottom:6}}>⚠ Nouveau déploiement requis</strong>
+            Extensions → Apps Script → remplace tout → <strong style={{color:"#D4A853"}}>Nouveau déploiement</strong> → App Web → Tout le monde → Déployer → copier l'URL.<br/>
+            <strong style={{color:"#D4A853",display:"block",margin:"8px 0 4px"}}>Nouvel onglet Sheet :</strong>
+            • <strong>Historique</strong> — 1 ligne par commande validée (JSON) · commun à tous les appareils<br/>
+            • <strong>Scieur</strong> — ajoute la colonne "Unité" en fin de ligne
           </div>
         </div>}
 
       </main>
 
-      {/* Nav 5 onglets */}
       <nav style={S.nav}>
         {[
           ["commande","✚","Commande"],
@@ -694,7 +880,7 @@ function json(o){
           ["libre","📐","Libre"],
           ["config","⚙","Config"],
         ].map(([k,ic,lb])=>(
-          <button key={k} style={{...S.navBtn,...(tab===k?S.navBtnActive:{})}} onClick={()=>setTab(k)}>
+          <button key={k} style={{...S.navBtn,...(tab===k?S.navBtnActive:{})}} onClick={()=>{setTab(k);if(k==="historique"&&histCmds.length===0)loadHist();}}>
             <span style={S.navIcon}>{ic}</span><span style={S.navLabel}>{lb}</span>
           </button>
         ))}
@@ -728,7 +914,7 @@ const S={
   btnBig:{width:"100%",padding:"14px",fontSize:14,fontWeight:700,background:"linear-gradient(135deg,#8B5E2A,#D4A853)",color:"#141210",border:"none",borderRadius:10,cursor:"pointer",letterSpacing:"0.06em",fontFamily:"Georgia,serif",boxShadow:"0 4px 16px rgba(212,168,83,.2)",marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8},
   btnDis:{opacity:.3,cursor:"not-allowed"},
   btnSmall:{padding:"8px 14px",fontSize:12,border:"1px solid rgba(212,168,83,.2)",background:"rgba(212,168,83,.06)",color:"#D4A853",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
-  btnRefresh:{width:"100%",padding:"10px",fontSize:13,background:"rgba(255,255,255,.03)",color:"#8a7a68",border:"1px solid rgba(255,255,255,.06)",borderRadius:8,cursor:"pointer",fontFamily:"Georgia,serif",marginBottom:14},
+  btnRefresh:{padding:"8px 14px",fontSize:12,background:"rgba(255,255,255,.03)",color:"#8a7a68",border:"1px solid rgba(255,255,255,.06)",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
   btnExport:{padding:"9px",fontSize:12,background:"rgba(212,168,83,.06)",color:"#D4A853",border:"1px solid rgba(212,168,83,.25)",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif"},
   btnDel:{padding:"9px 12px",fontSize:13,background:"rgba(200,80,60,.05)",color:"#e07a5f",border:"1px solid rgba(200,80,60,.2)",borderRadius:7,cursor:"pointer"},
   nav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,zIndex:20,display:"flex",background:"rgba(8,6,4,.98)",borderTop:"1px solid rgba(212,168,83,.15)",backdropFilter:"blur(12px)",paddingBottom:"env(safe-area-inset-bottom,0px)"},
