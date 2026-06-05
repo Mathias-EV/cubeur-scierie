@@ -41,19 +41,27 @@ function calculParUnite(p){
   if(unite==="m³"&&(!ep||!la||!lo||!nb)) return null;
   if(!nb) return null;
 
-  let vu, vc;
+  let vu, vc, volReel=null;
   if(unite==="m³"){
     vu=round(ep*la*lo,6); vc=round(vu*nb,4);
   } else if(unite==="m²"){
-    // Surface si dims dispo, sinon juste nb
-    vu=(la&&lo)?round(la*lo,6):null; vc=vu!=null?round(vu*nb,4):nb;
+    // vu = surface unitaire (la×lo) si dims dispo
+    vu=(la&&lo)?round(la*lo,6):null;
+    vc=round(nb,4); // nb = m² total saisi
+    // Volume réel = surface totale × épaisseur (si ep disponible)
+    if(ep&&nb) volReel=round(nb*ep,4);
   } else {
-    // Linéaire si longueur dispo, sinon juste nb
-    vu=lo?round(lo,6):null; vc=vu!=null?round(vu*nb,4):nb;
+    // mL
+    vu=lo?round(lo,6):null;
+    vc=round(nb,4); // nb = mL total saisi
+    // Volume réel = linéaire total × épaisseur × largeur (si ep+la disponibles)
+    if(ep&&la&&nb) volReel=round(nb*ep*la,4);
   }
-  const rend=(unite==="m³"&&vg>0)?round(vc/vg,4):null;
-  const perte=rend!=null?round(1-rend,4):null;
-  return { volUnit:vu, volCharge:vc, rend, perte, unite };
+  // Rendement : m³ vs grume direct | m²/mL via volume réel calculé si possible
+  let rend=null, perte=null;
+  if(unite==="m³"&&vg>0){ rend=round(vc/vg,4); perte=round(1-rend,4); }
+  else if(unite!=="m³"&&volReel!=null&&vg>0){ rend=round(volReel/vg,4); perte=round(1-rend,4); }
+  return { volUnit:vu, volCharge:vc, volReel, rend, perte, unite };
 }
 
 // Calcul cubage libre (m³ uniquement)
@@ -272,12 +280,12 @@ export default function App(){
 
     const row=[date,cmd.id,pid,p.produit,p.essence,p.qualite,
       p.epaisseur,p.largeur,p.longueur,p.nbUnites,
-      vg,vu,vc,rend??0,perte??0,unite];
+      vg,vu,vc,res.volReel??"—",rend??"—",perte??"—",unite];
 
     try{
       await callScript(scriptUrl,{type:"cubageProduit",row,id:pid});
       const fresh=cubeRef.current[cmd.id]||{};
-      const updatedCmd={...fresh,[pid]:{...fresh[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,rend,perte,unite}};
+      const updatedCmd={...fresh,[pid]:{...fresh[pid],exported:true,exporting:false,volUnit:vu,volCharge:vc,volReel:res.volReel??null,rend,perte,unite}};
       const tousExportes=Object.values(updatedCmd).every(p2=>p2.exported);
       cubeRef.current={...cubeRef.current,[cmd.id]:updatedCmd};
       forceRender(v=>v+1);
@@ -295,8 +303,8 @@ export default function App(){
             produit:p2.produit,essence:p2.essence,qualite:p2.qualite,
             epaisseur:p2.epaisseur,largeur:p2.largeur,longueur:p2.longueur,
             nbUnites:p2.nbUnites,volumeGrume:p2.volumeGrume,
-            volUnit:p2.volUnit,volCharge:p2.volCharge,rend:p2.rend,perte:p2.perte,
-            unite:p2.unite||"m³"
+            volUnit:p2.volUnit,volCharge:p2.volCharge,volReel:p2.volReel??null,
+            rend:p2.rend,perte:p2.perte,unite:p2.unite||"m³"
           }))
         };
         try{ await callScript(scriptUrl,{type:"saveHistorique",entry:hEntry}); }catch(e){}
@@ -399,7 +407,7 @@ export default function App(){
                   <Field label="Long. m (opt.)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
                 </Row3>
               )}
-              <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Quantité (m²)":"Quantité (mL)"} style={{marginTop:10}}>
+              <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Total commandé (m²)":"Total commandé (mL)"} style={{marginTop:10}}>
                 <Num value={lg.quantite} onChange={sl(i,"quantite")} ph="100"/>
               </Field>
               {form.lignes.length>1&&<button style={{...S.btnDel,marginTop:10,width:"100%",textAlign:"center"}} onClick={()=>delL(i)}>🗑 Supprimer ce produit</button>}
@@ -540,18 +548,19 @@ export default function App(){
                               )}
 
                               <Row2 style={{marginTop:10}}>
-                                <Field label={u==="m²"?"Quantité (m²)":u==="mL"?"Quantité (mL)":"Nb unités prod."}>
+                                <Field label={u==="m²"?"Total produit (m²)":u==="mL"?"Total produit (mL)":"Nb unités prod."}>
                                   <Num value={p.nbUnites} onChange={e=>setField(cmd.id,pid,"nbUnites",e.target.value)} ph={p.nbUnites||"200"}/>
                                 </Field>
                                 {u==="m³"&&<Field label="Vol. grume (m³)"><Num value={p.volumeGrume} onChange={e=>setField(cmd.id,pid,"volumeGrume",e.target.value)} ph="2.5"/></Field>}
                               </Row2>
 
                               {p.volCharge!=null&&(
-                                <div style={{marginTop:8,background:"rgba(212,168,83,.04)",borderRadius:8,padding:"8px 10px",display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":"1fr 1fr",gap:6}}>
-                                  <Mini label="Vol. unit." value={m3f(p.volUnit,u)} color="#e8ddd0"/>
-                                  <Mini label={u==="mL"?"Linéaire total":u==="m²"?"Surface totale":"Vol. charge"} value={m3f(p.volCharge,u)} color="#D4A853"/>
-                                  {u==="m³"&&<Mini label="Rendement" value={p.rend!=null?pct(p.rend):"—"} color="#6dbf7e"/>}
-                                  {u==="m³"&&<Mini label="Perte" value={p.perte!=null?pct(p.perte):"—"} color="#e07a5f"/>}
+                                <div style={{marginTop:8,background:"rgba(212,168,83,.04)",borderRadius:8,padding:"8px 10px",display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":((p.volUnit!=null&&p.rend!=null)?"1fr 1fr 1fr 1fr":p.volUnit!=null?"1fr 1fr 1fr":"1fr 1fr"),gap:6}}>
+                                  {(u==="m³"||p.volUnit!=null)&&<Mini label={u==="m³"?"Vol. unit.":"Dim. unit."} value={m3f(p.volUnit||0,u)} color="#e8ddd0"/>}
+                                  <Mini label={u==="mL"?"Total (mL)":u==="m²"?"Total (m²)":"Vol. charge"} value={m3f(p.volCharge,u)} color="#D4A853"/>
+                                  {u!=="m³"&&p.volReel!=null&&<Mini label="Vol. réel m³" value={m3f(p.volReel)} color="#C4904A"/>}
+                                  {p.rend!=null&&<Mini label="Rendement" value={pct(p.rend)} color="#6dbf7e"/>}
+                                  {p.perte!=null&&<Mini label="Perte" value={pct(p.perte)} color="#e07a5f"/>}
                                 </div>
                               )}
                               {u==="m³"&&p.volCharge!=null&&p.rend!=null&&<div style={{...S.rendBar,marginTop:6}}><div style={{...S.rendFill,width:pct(p.rend)}}/></div>}
@@ -624,12 +633,17 @@ export default function App(){
                       <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:8}}>
                         {`${l.epaisseur||"—"}mm × ${l.largeur||"—"}mm · ${l.longueur||"—"}m · ${l.nbUnites||"—"}u.`}
                       </div>
-                      <div style={{display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr 1fr 1fr":"1fr 1fr",gap:8}}>
-                        {u==="m³"&&<Mini label="Grume" value={m3f(l.volumeGrume||0)} color="#a09080"/>}
-                        <Mini label={u==="mL"?"Linéaire":u==="m²"?"Surface":"Volume"} value={m3f(l.volCharge||0,u)} color="#D4A853"/>
-                        {u==="m³"&&l.rend!=null&&<Mini label="Rendement" value={pct(l.rend)} color="#6dbf7e"/>}
-                        {u==="m³"&&l.perte!=null&&<Mini label="Perte" value={pct(l.perte)} color="#e07a5f"/>}
-                      </div>
+                      {(()=>{
+                        const cols=u==="m³"?4:(l.volUnit&&l.rend!=null?5:l.volUnit?3:2);
+                        return <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},1fr)`,gap:8}}>
+                          {u==="m³"&&<Mini label="Grume" value={m3f(l.volumeGrume||0)} color="#a09080"/>}
+                          {u!=="m³"&&l.volUnit&&<Mini label="Dim. unit." value={m3f(l.volUnit,u)} color="#e8ddd0"/>}
+                          <Mini label={u==="mL"?"Total mL":u==="m²"?"Total m²":"Volume"} value={m3f(l.volCharge||0,u)} color="#D4A853"/>
+                          {u!=="m³"&&l.volReel!=null&&<Mini label="Vol. réel m³" value={m3f(l.volReel)} color="#C4904A"/>}
+                          {l.rend!=null&&<Mini label="Rendement" value={pct(l.rend)} color="#6dbf7e"/>}
+                          {l.perte!=null&&<Mini label="Perte" value={pct(l.perte)} color="#e07a5f"/>}
+                        </div>;
+                      })()}
                     </div>
                   );
                 })}
