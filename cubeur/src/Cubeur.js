@@ -13,7 +13,7 @@ const UNITES   = ["m³","m²","mL"];
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³" };
 const initCmd   = { client:"",dateLivraison:"",notes:"",lignes:[{...initLigne}] };
-const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"" };
+const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const round=(n,d=6)=>Math.round(n*10**d)/10**d;
@@ -331,14 +331,45 @@ export default function App(){
   // CUBAGE LIBRE
   // ─────────────────────────────────────────────────────────────────────────────
   const sfree=f=>e=>setFree(p=>({...p,[f]:e.target.value}));
-  const freeRes=calcul(freeForm);
+  const sfreeUnite=v=>setFree(p=>({...p,unite:v,epaisseur:"",largeur:"",longueur:"",nbUnites:"",volumeGrume:""}));
+  // Calcul libre : utilise calculParUnite pour toutes les unités
+  const freeRes=calculParUnite(freeForm);
   const freeOk=freeRes&&freeForm.produit&&freeForm.essence&&freeForm.qualite;
-  const addFree=()=>{
+  const addFree=async()=>{
     if(!freeOk)return;
-    const e={...freeForm,...freeRes,id:Date.now(),date:fmtDate()};
-    const nh=[e,...freeHistory];
+    const entry={
+      id:"LIBRE-"+Date.now().toString(36).toUpperCase().slice(-6),
+      type:"libre", date:fmtDate(),
+      produit:freeForm.produit, essence:freeForm.essence, qualite:freeForm.qualite,
+      epaisseur:freeForm.epaisseur, largeur:freeForm.largeur, longueur:freeForm.longueur,
+      nbUnites:freeForm.nbUnites, volumeGrume:freeForm.volumeGrume,
+      unite:freeForm.unite||"m³",
+      volUnit:freeRes.volUnit, volCharge:freeRes.volCharge,
+      volReel:freeRes.volReel??null, rend:freeRes.rend, perte:freeRes.perte
+    };
+    // Sauvegarder dans l'historique commun du Sheet
+    if(scriptUrl){
+      try{
+        const hEntry={
+          id:entry.id, client:"Cubage libre", type:"libre",
+          dateLivraison:"—", dateValidation:entry.date, notes:"",
+          lignes:[{
+            produit:entry.produit, essence:entry.essence, qualite:entry.qualite,
+            epaisseur:entry.epaisseur, largeur:entry.largeur, longueur:entry.longueur,
+            nbUnites:entry.nbUnites, volumeGrume:entry.volumeGrume,
+            volUnit:entry.volUnit, volCharge:entry.volCharge,
+            volReel:entry.volReel, rend:entry.rend, perte:entry.perte,
+            unite:entry.unite
+          }]
+        };
+        await callScript(scriptUrl,{type:"saveHistorique",entry:hEntry});
+        setHistCmds(h=>[hEntry,...h]);
+      }catch(e){}
+    }
+    // Garder aussi en local pour affichage immédiat dans cet onglet
+    const nh=[entry,...freeHistory];
     setFreeHist(nh); localStorage.setItem("cube_history",JSON.stringify(nh));
-    showToast("Charge cubée ✓"); setFree(initCube);
+    showToast("Charge cubée et sauvegardée ✓"); setFree(initCube);
   };
   const exportFree=async(e)=>{
     if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
@@ -606,12 +637,12 @@ export default function App(){
         {tab==="historique"&&<div style={S.page}>
           {/* Détail d'une commande — overlay */}
           {histDetail&&(
-            <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.85)",overflowY:"auto",padding:"20px 14px"}}>
+            <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.96)",overflowY:"auto",padding:"20px 14px"}}>
               <div style={{maxWidth:480,margin:"0 auto"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
                   <div>
                     <div style={{fontSize:11,color:"#5bb8d4"}}>{histDetail.id}</div>
-                    <div style={{fontWeight:700,color:"#e8ddd0",fontSize:18}}>{histDetail.client}</div>
+                    <div style={{fontWeight:700,color:"#e8ddd0",fontSize:18}}>{histDetail.type==="libre"?"📐 Cubage libre":histDetail.client}</div>
                   </div>
                   <button style={{...S.btnSmall,fontSize:16,padding:"6px 14px"}} onClick={()=>setHistDetail(null)}>✕</button>
                 </div>
@@ -634,7 +665,7 @@ export default function App(){
                 {(histDetail.lignes||[]).map((l,i)=>{
                   const u=l.unite||"m³";
                   return (
-                    <div key={i} style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(212,168,83,.12)",borderRadius:10,padding:"12px",marginBottom:8}}>
+                    <div key={i} style={{background:"rgba(30,22,12,.95)",border:"1px solid rgba(212,168,83,.3)",borderRadius:10,padding:"12px",marginBottom:8}}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                         <div style={{fontWeight:700,color:"#D4A853",fontSize:13}}>{l.produit} · {l.essence}{l.qualite&&<span style={{color:"#6a5a4a",fontWeight:400}}> · {l.qualite}</span>}</div>
                         <span style={{background:"rgba(91,184,212,.12)",color:"#5bb8d4",padding:"2px 8px",borderRadius:12,fontSize:11,fontWeight:700}}>{u}</span>
@@ -669,20 +700,27 @@ export default function App(){
           {histCmds.length===0&&!histLoading&&scriptUrl&&<Empty icon="📚" text="Aucune commande validée — appuie sur ↻ pour charger"/>}
           {histLoading&&<Empty icon="⏳" text="Chargement..."/>}
 
-          {histCmds.map(h=>(
-            <div key={h.id} style={{...S.card,borderColor:"rgba(109,191,126,.2)",cursor:"pointer"}}
+          {histCmds.map(h=>{
+            const isLibre=h.type==="libre";
+            const borderC=isLibre?"rgba(154,122,84,.35)":"rgba(109,191,126,.2)";
+            const accentC=isLibre?"#9A7A54":"#6dbf7e";
+            const bgC=isLibre?"rgba(154,122,84,.04)":"transparent";
+            return (
+            <div key={h.id} style={{...S.card,borderColor:borderC,borderLeft:`3px solid ${accentC}`,background:bgC,cursor:"pointer"}}
               onClick={()=>setHistDetail(h)}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
                 <div>
                   <div style={{fontSize:11,color:"#5bb8d4"}}>{h.id}</div>
-                  <div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{h.client}</div>
+                  <div style={{fontWeight:700,color:"#e8ddd0",fontSize:14}}>{isLibre?"Cubage libre":h.client}</div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
-                  <span style={{fontSize:11,color:"#6dbf7e",background:"rgba(109,191,126,.1)",padding:"3px 8px",borderRadius:12,border:"1px solid rgba(109,191,126,.2)"}}>✓ Réalisée</span>
+                  <span style={{fontSize:11,color:accentC,background:`rgba(${isLibre?"154,122,84":"109,191,126"},.1)`,padding:"3px 8px",borderRadius:12,border:`1px solid rgba(${isLibre?"154,122,84":"109,191,126"},.2)`}}>
+                    {isLibre?"📐 Libre":"✓ Réalisée"}
+                  </span>
                   <span style={{fontSize:10,color:"#6a5a4a"}}>{h.dateValidation}</span>
                 </div>
               </div>
-              <div style={{fontSize:12,color:"#6a5a4a",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{h.dateLivraison}</strong></div>
+              <div style={{fontSize:12,color:"#6a5a4a",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{isLibre?h.dateValidation:h.dateLivraison}</strong></div>
               {/* Résumé compact */}
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
                 {(h.lignes||[]).map((l,i)=>(
@@ -698,63 +736,100 @@ export default function App(){
               </div>
               <div style={{fontSize:10,color:"#5bb8d4",marginTop:6,textAlign:"right"}}>Appuyer pour voir le détail →</div>
             </div>
-          ))}
+            );
+          })}
         </div>}
 
         {/* ══ CUBAGE LIBRE ══ */}
         {tab==="libre"&&<div style={S.page}>
-          <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14,textAlign:"center"}}>Cubage hors commande — sciage libre (m³)</div>
+          <div style={{fontSize:12,color:"#6a5a4a",marginBottom:14,textAlign:"center"}}>Cubage hors commande — sciage libre</div>
+
           <Card title="Produit">
+            <Field label="Unité de mesure" style={{marginBottom:12}}>
+              <UniteSel value={freeForm.unite||"m³"} onChange={sfreeUnite}/>
+            </Field>
             <Row2 style={{marginBottom:12}}>
               <Field label="Produit"><Sel value={freeForm.produit} onChange={sfree("produit")} opts={PRODUITS}/></Field>
               <Field label="Essence"><Sel value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
             </Row2>
             <Field label="Qualité"><Sel value={freeForm.qualite} onChange={sfree("qualite")} opts={QUALITES}/></Field>
           </Card>
-          <Card title="Dimensions">
-            <Row3>
-              <Field label="Ép. (mm)"><Num value={freeForm.epaisseur} onChange={sfree("epaisseur")} ph="27"/></Field>
-              <Field label="Larg. (mm)"><Num value={freeForm.largeur} onChange={sfree("largeur")} ph="120"/></Field>
-              <Field label="Long. (m)"><Num value={freeForm.longueur} onChange={sfree("longueur")} ph="2.4"/></Field>
-            </Row3>
+
+          <Card title={(freeForm.unite||"m³")==="m³"?"Dimensions":"Dimensions"}>
+            {(freeForm.unite||"m³")==="m³"?(
+              <Row3>
+                <Field label="Ép. mm"><Num value={freeForm.epaisseur} onChange={sfree("epaisseur")} ph="27"/></Field>
+                <Field label="Larg. mm"><Num value={freeForm.largeur} onChange={sfree("largeur")} ph="120"/></Field>
+                <Field label="Long. m"><Num value={freeForm.longueur} onChange={sfree("longueur")} ph="2.4"/></Field>
+              </Row3>
+            ):(
+              <Row3>
+                <Field label="Ép. mm (opt.)"><Num value={freeForm.epaisseur} onChange={sfree("epaisseur")} ph="27"/></Field>
+                <Field label="Larg. mm (opt.)"><Num value={freeForm.largeur} onChange={sfree("largeur")} ph="120"/></Field>
+                <Field label="Long. m (opt.)"><Num value={freeForm.longueur} onChange={sfree("longueur")} ph="2.4"/></Field>
+              </Row3>
+            )}
           </Card>
+
           <Card title="Charge">
             <Row2>
-              <Field label="Nb unités"><Num value={freeForm.nbUnites} onChange={sfree("nbUnites")} ph="200"/></Field>
-              <Field label="Vol. grume (m³)"><Num value={freeForm.volumeGrume} onChange={sfree("volumeGrume")} ph="2.5"/></Field>
+              <Field label={(freeForm.unite||"m³")==="m³"?"Nb unités":freeForm.unite==="m²"?"Total (m²)":"Total (mL)"}>
+                <Num value={freeForm.nbUnites} onChange={sfree("nbUnites")} ph={(freeForm.unite||"m³")==="m³"?"200":"ex: 15"}/>
+              </Field>
+              <Field label={(freeForm.unite||"m³")==="m³"?"Vol. grume (m³)":"Vol. grume m³ (opt.)"}>
+                <Num value={freeForm.volumeGrume} onChange={sfree("volumeGrume")} ph="2.5"/>
+              </Field>
             </Row2>
           </Card>
-          {freeRes?(
-            <div style={S.resultBox}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-                <RItem label="Vol. unitaire" value={m3f(freeRes.volumeUnit)}/>
-                <RItem label="Vol. charge" value={m3f(freeRes.volumeCharge)} big/>
-                <RItem label="Rendement" value={pct(freeRes.rendement)} color="#6dbf7e"/>
-                <RItem label="Perte" value={pct(freeRes.perte)} color="#e07a5f"/>
+
+          {freeRes&&(()=>{
+            const u=freeForm.unite||"m³";
+            return (
+              <div style={S.resultBox}>
+                <div style={{display:"grid",gridTemplateColumns:u==="m³"?"1fr 1fr":(freeRes.volUnit!=null&&freeRes.rend!=null)?"1fr 1fr 1fr 1fr":freeRes.volUnit!=null?"1fr 1fr 1fr":"1fr 1fr",gap:12,marginBottom:12}}>
+                  {(u==="m³"||freeRes.volUnit!=null)&&<RItem label={u==="m³"?"Vol. unitaire":"Dim. unitaire"} value={m3f(freeRes.volUnit||0,u)}/>}
+                  <RItem label={u==="m²"?"Total m²":u==="mL"?"Total mL":"Vol. charge"} value={m3f(freeRes.volCharge,u)} big/>
+                  {u!=="m³"&&freeRes.volReel!=null&&<RItem label="Vol. réel m³" value={m3f(freeRes.volReel)} color="#C4904A"/>}
+                  {freeRes.rend!=null&&<RItem label="Rendement" value={pct(freeRes.rend)} color="#6dbf7e"/>}
+                  {freeRes.perte!=null&&<RItem label="Perte" value={pct(freeRes.perte)} color="#e07a5f"/>}
+                </div>
+                {freeRes.rend!=null&&<div style={S.rendBar}><div style={{...S.rendFill,width:pct(freeRes.rend)}}/></div>}
               </div>
-              <div style={S.rendBar}><div style={{...S.rendFill,width:pct(freeRes.rendement)}}/></div>
-            </div>
-          ):<div style={S.hint}>Remplis les champs pour calculer</div>}
-          <button style={{...S.btnBig,...(!freeOk?S.btnDis:{})}} onClick={addFree} disabled={!freeOk}>Cuber et sauvegarder</button>
+            );
+          })()}
+          {!freeRes&&<div style={S.hint}>Remplis les champs pour calculer</div>}
+
+          <button style={{...S.btnBig,...(!freeOk?S.btnDis:{})}} onClick={addFree} disabled={!freeOk}>
+            Cuber et sauvegarder dans l'historique
+          </button>
+
+          {/* Historique local récent */}
           {freeHistory.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#D4A853",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(212,168,83,.15)"}}>Historique local ({freeHistory.length})</div>
-            {freeHistory.map(e=>(
-              <div key={e.id} style={{...S.card,borderColor:exportedSet.has(String(e.id))?"rgba(109,191,126,.2)":"rgba(212,168,83,.12)"}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontWeight:700,color:"#D4A853"}}>{e.produit} · {e.essence}</span>
-                  {exportedSet.has(String(e.id))&&<span style={{fontSize:11,color:"#6dbf7e"}}>✓ exporté</span>}
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#9A7A54",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(154,122,84,.2)"}}>
+              Sessions récentes (local)
+            </div>
+            {freeHistory.slice(0,5).map(e=>{
+              const u=e.unite||"m³";
+              return (
+                <div key={e.id} style={{...S.card,borderColor:"rgba(154,122,84,.25)",borderLeft:"3px solid rgba(154,122,84,.5)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <div>
+                      <span style={{fontWeight:700,color:"#D4A853"}}>{e.produit} · {e.essence}</span>
+                      <span style={{marginLeft:6,fontSize:11,color:"#5bb8d4",background:"rgba(91,184,212,.08)",padding:"1px 6px",borderRadius:8}}>{u}</span>
+                    </div>
+                    <span style={{fontSize:10,color:"#9A7A54",background:"rgba(154,122,84,.1)",padding:"2px 7px",borderRadius:8,border:"1px solid rgba(154,122,84,.2)"}}>Libre</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#6a5a4a",fontFamily:"monospace",marginBottom:6}}>
+                    {e.epaisseur&&`${e.epaisseur}×${e.largeur}mm · `}{e.longueur&&`${e.longueur}m · `}
+                    <strong style={{color:"#D4A853"}}>{m3f(e.volCharge||0,u)}</strong>
+                    {e.volReel!=null&&<span style={{color:"#C4904A"}}> · réel {m3f(e.volReel)}</span>}
+                    {e.rend!=null&&<span style={{color:"#6dbf7e"}}> · {pct(e.rend)}</span>}
+                  </div>
+                  <div style={{fontSize:10,color:"#5a4a3a"}}>{e.date}</div>
                 </div>
-                <div style={{fontSize:12,color:"#6a5a4a",fontFamily:"monospace",marginBottom:8}}>{e.epaisseur}×{e.largeur}mm · {e.longueur}m · {e.nbUnites}u · {m3f(e.volumeCharge)}</div>
-                <div style={{display:"flex",gap:8}}>
-                  {exportedSet.has(String(e.id))?(
-                    <div style={{flex:1,textAlign:"center",fontSize:12,color:"#6dbf7e",padding:"8px",border:"1px solid rgba(109,191,126,.15)",borderRadius:7}}>✓ Exporté</div>
-                  ):(
-                    <button style={{...S.btnExport,flex:1}} onClick={()=>exportFree(e)} disabled={freeExp[e.id]}>{freeExp[e.id]?"…":"↑ Google Sheets"}</button>
-                  )}
-                  <button style={S.btnDel} onClick={()=>{const nh=freeHistory.filter(x=>x.id!==e.id);setFreeHist(nh);localStorage.setItem("cube_history",JSON.stringify(nh));}}>🗑</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
+            {freeHistory.length>5&&<div style={{fontSize:11,color:"#6a5a4a",textAlign:"center",marginTop:6}}>+ {freeHistory.length-5} autres · voir l'onglet Historique</div>}
           </>}
         </div>}
 
