@@ -38,15 +38,18 @@ function calculParUnite(p){
   const vg=parseFloat(p.volumeGrume);
   const unite=p.unite||"m³";
 
-  if(!ep||!la||!lo||!nb) return null;
+  if(unite==="m³"&&(!ep||!la||!lo||!nb)) return null;
+  if(!nb) return null;
 
   let vu, vc;
   if(unite==="m³"){
     vu=round(ep*la*lo,6); vc=round(vu*nb,4);
   } else if(unite==="m²"){
-    vu=round(la*lo,6); vc=round(vu*nb,4);   // surface
+    // Surface si dims dispo, sinon juste nb
+    vu=(la&&lo)?round(la*lo,6):null; vc=vu!=null?round(vu*nb,4):nb;
   } else {
-    vu=round(lo,6); vc=round(vu*nb,4);       // linéaire
+    // Linéaire si longueur dispo, sinon juste nb
+    vu=lo?round(lo,6):null; vc=vu!=null?round(vu*nb,4):nb;
   }
   const rend=(unite==="m³"&&vg>0)?round(vc/vg,4):null;
   const perte=rend!=null?round(1-rend,4):null;
@@ -244,10 +247,12 @@ export default function App(){
 
   const isPret=(p)=>{
     const u=p.unite||"m³";
-    // Toujours demander les 3 dimensions + nb unités
-    const hasDims=p.epaisseur&&p.largeur&&p.longueur&&p.nbUnites;
-    // Vol. grume obligatoire seulement pour m³
-    return hasDims&&!p.exported&&!p.exporting&&(u!=="m³"||p.volumeGrume);
+    if(u==="m³"){
+      // m³ : toutes les dims + grume obligatoires
+      return p.epaisseur&&p.largeur&&p.longueur&&p.nbUnites&&p.volumeGrume&&!p.exported&&!p.exporting;
+    }
+    // m² et mL : seule la quantité est obligatoire, dims optionnelles
+    return p.nbUnites&&!p.exported&&!p.exporting;
   };
 
   const validerProduit=async(cmd,pid)=>{
@@ -380,13 +385,21 @@ export default function App(){
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
-              {/* Dimensions complètes pour toutes les unités */}
-              <Row3>
-                <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
-                <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
-                <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-              </Row3>
-              <Field label="Quantité (unités)" style={{marginTop:10}}>
+              {/* Dimensions : obligatoires en m³, optionnelles en m²/mL */}
+              {(lg.unite||"m³")==="m³"?(
+                <Row3>
+                  <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
+                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                  <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+                </Row3>
+              ):(
+                <Row3>
+                  <Field label="Ép. mm (opt.)"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
+                  <Field label="Larg. mm (opt.)"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                  <Field label="Long. m (opt.)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+                </Row3>
+              )}
+              <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Quantité (m²)":"Quantité (mL)"} style={{marginTop:10}}>
                 <Num value={lg.quantite} onChange={sl(i,"quantite")} ph="100"/>
               </Field>
               {form.lignes.length>1&&<button style={{...S.btnDel,marginTop:10,width:"100%",textAlign:"center"}} onClick={()=>delL(i)}>🗑 Supprimer ce produit</button>}
@@ -511,15 +524,25 @@ export default function App(){
                             </div>
                           ):(
                             <>
-                              {/* Dimensions complètes pour toutes les unités */}
-                              <Row3>
-                                <Field label="Ép. mm"><Num value={p.epaisseur} onChange={e=>setField(cmd.id,pid,"epaisseur",e.target.value)} ph="27"/></Field>
-                                <Field label="Larg. mm"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
-                                <Field label="Long. m"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
-                              </Row3>
+                              {/* m³ : tout obligatoire | m²/mL : dims optionnelles */}
+                              {u==="m³"?(
+                                <Row3>
+                                  <Field label="Ép. mm"><Num value={p.epaisseur} onChange={e=>setField(cmd.id,pid,"epaisseur",e.target.value)} ph="27"/></Field>
+                                  <Field label="Larg. mm"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
+                                  <Field label="Long. m"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
+                                </Row3>
+                              ):(
+                                <Row3>
+                                  <Field label="Ép. mm (opt.)"><Num value={p.epaisseur} onChange={e=>setField(cmd.id,pid,"epaisseur",e.target.value)} ph="27"/></Field>
+                                  <Field label="Larg. mm (opt.)"><Num value={p.largeur} onChange={e=>setField(cmd.id,pid,"largeur",e.target.value)} ph="120"/></Field>
+                                  <Field label="Long. m (opt.)"><Num value={p.longueur} onChange={e=>setField(cmd.id,pid,"longueur",e.target.value)} ph="2.4"/></Field>
+                                </Row3>
+                              )}
 
                               <Row2 style={{marginTop:10}}>
-                                <Field label="Nb unités prod."><Num value={p.nbUnites} onChange={e=>setField(cmd.id,pid,"nbUnites",e.target.value)} ph={p.nbUnites||"200"}/></Field>
+                                <Field label={u==="m²"?"Quantité (m²)":u==="mL"?"Quantité (mL)":"Nb unités prod."}>
+                                  <Num value={p.nbUnites} onChange={e=>setField(cmd.id,pid,"nbUnites",e.target.value)} ph={p.nbUnites||"200"}/>
+                                </Field>
                                 {u==="m³"&&<Field label="Vol. grume (m³)"><Num value={p.volumeGrume} onChange={e=>setField(cmd.id,pid,"volumeGrume",e.target.value)} ph="2.5"/></Field>}
                               </Row2>
 
