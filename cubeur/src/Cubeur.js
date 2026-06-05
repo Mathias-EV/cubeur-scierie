@@ -366,6 +366,21 @@ export default function App(){
         setHistCmds(h=>[hEntry,...h]);
       }catch(e){}
     }
+    // Envoyer aussi dans le Sheet Scieur (anti-doublon sur entry.id)
+    if(scriptUrl){
+      try{
+        const u=entry.unite||"m³";
+        const row=[
+          entry.date, "", entry.id,
+          entry.produit, entry.essence, entry.qualite,
+          entry.epaisseur, entry.largeur, entry.longueur,
+          entry.nbUnites, entry.volumeGrume||0,
+          entry.volUnit||0, entry.volCharge||0,
+          entry.volReel??"—", entry.rend??"—", entry.perte??"—", u
+        ];
+        await callScript(scriptUrl,{type:"cubageProduit",row,id:entry.id});
+      }catch(e){}
+    }
     // Garder aussi en local pour affichage immédiat dans cet onglet
     const nh=[entry,...freeHistory];
     setFreeHist(nh); localStorage.setItem("cube_history",JSON.stringify(nh));
