@@ -1677,7 +1677,7 @@ export default function App(){
             {scriptUrl&&<div style={{fontSize:12,color:"#6dbf7e",marginTop:8}}>✓ URL enregistrée</div>}
           </Card>
           <Card title="Script Apps Script — Version complète">
-            <pre style={S.pre}>{`function doGet(e) {
+            <pre style={S.pre}>`function doGet(e) {
   var ss = SpreadsheetApp.openById("${SHEET_ID}");
   var action = e.parameter.action;
 
@@ -1690,7 +1690,7 @@ export default function App(){
       var o={}; h.forEach(function(k,i){o[k]=r[i];});
       var id=String(o["id"]||"").trim();
       if(id){
-        map[id]={id,client:o["client"],
+        map[id]={id:id,client:o["client"],
           dateLivraison:o["dateLivraison"],notes:o["notes"],
           statut:o["statut"]||"attente",
           dateCreation:o["dateCreation"],lignes:[]};
@@ -1702,16 +1702,15 @@ export default function App(){
         qualite:o["qualite"],epaisseur:o["epaisseur"],
         largeur:o["largeur"],longueur:o["longueur"],
         quantite:o["quantite"],prodId:o["prodId"]||"",
-        unite:o["unite"]||"m³",
+        unite:o["unite"]||"m\u00b3",
         prixUnitaire:o["prixUnitaire"]||"",
-        typePrix:o["typePrix"]||o["unite"]||"m³",
+        typePrix:o["typePrix"]||o["unite"]||"m\u00b3",
         typeTaxe:o["typeTaxe"]||"HT"
       });
-      // Adresses + remise sur la 1ère ligne du bloc
       if(String(o["id"]||"").trim()&&map[cid]){
         if(o["adresseClient"]) map[cid].adresseClient=o["adresseClient"];
         if(o["adresseLivraison"]) map[cid].adresseLivraison=o["adresseLivraison"];
-        if(o["remise"]) map[cid].remise=o["remise"];
+        if(o["remise"]!==undefined&&String(o["remise"])!=="") map[cid].remise=String(o["remise"]);
       }
     });
     return json({commandes:order.map(function(id){return map[id];})});
@@ -1736,11 +1735,18 @@ function doPost(e) {
 
   if(d.type==="commande"){
     var s=ss.getSheetByName("Vendeur")||ss.insertSheet("Vendeur");
-    if(s.getLastRow()===0)
-      s.appendRow(["id","client","produit","essence","qualite",
-        "epaisseur","largeur","longueur","quantite",
-        "dateLivraison","notes","statut","dateCreation","prodId","unite",
-        "prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise"]);
+    var header=["id","client","produit","essence","qualite",
+      "epaisseur","largeur","longueur","quantite",
+      "dateLivraison","notes","statut","dateCreation","prodId","unite",
+      "prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise"];
+    if(s.getLastRow()===0){
+      s.appendRow(header);
+    } else {
+      var existingHeader=s.getRange(1,1,1,s.getLastColumn()).getValues()[0].map(String);
+      if(existingHeader.indexOf("remise")===-1){
+        s.getRange(1,existingHeader.length+1).setValue("remise");
+      }
+    }
     var ids=s.getLastRow()>1
       ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];
     if(ids.indexOf(String(d.id))===-1)
@@ -1780,8 +1786,8 @@ function doPost(e) {
     var s=ss.getSheetByName("Scieur")||ss.insertSheet("Scieur");
     if(s.getLastRow()===0)
       s.appendRow(["Date","Cmd ID","Prod ID","Produit","Essence",
-        "Qualité","Ép.mm","Larg.mm","Long.m","Nb unités",
-        "Vol.Grume m³","Vol.Unitaire","Vol.Charge","Rendement","Perte","Unité"]);
+        "Qualite","Ep.mm","Larg.mm","Long.m","Nb unites",
+        "Vol.Grume m3","Vol.Unitaire","Vol.Charge","Rendement","Perte","Unite"]);
     var col3=s.getLastRow()>1
       ?s.getRange(2,3,s.getLastRow()-1,1).getValues().flat().map(String):[];
     if(col3.indexOf(String(d.id))===-1) s.appendRow(d.row);
@@ -1790,7 +1796,6 @@ function doPost(e) {
   if(d.type==="saveHistorique"){
     var s=ss.getSheetByName("Historique")||ss.insertSheet("Historique");
     if(s.getLastRow()===0) s.appendRow(["data_json"]);
-    // Anti-doublon sur l'id de commande
     var existing=s.getLastRow()>1
       ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat():[];
     var alreadyIn=existing.some(function(cell){
@@ -1805,7 +1810,9 @@ function doPost(e) {
 function json(o){
   return ContentService.createTextOutput(JSON.stringify(o))
     .setMimeType(ContentService.MimeType.JSON);
-}`}</pre>
+}
+`
+`}</pre>
           </Card>
           <div style={{background:"#1A1D20",border:"1px solid rgba(255,255,255,.07)",borderRadius:8,padding:14,fontSize:12,color:"#8A9BB0",lineHeight:1.9}}>
             <strong style={{color:"#34C759",display:"block",marginBottom:6}}>⚠ Nouveau déploiement requis</strong>
