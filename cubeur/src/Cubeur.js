@@ -1009,27 +1009,14 @@ export default function App(){
                         <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Commandé </span>
                         <span style={{fontSize:15,fontWeight:700,color:"#0A84FF"}}>{nb} {u}</span>
                       </div>}
-                      {(u==="m³direct"||vol!=null)&&<div>
+                      {(u==="m³direct"||vol!=null)&&<div style={{display:"flex",alignItems:"center",gap:6}}>
                         <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>
-                          {u==="m³"?"Volume charge":u==="m³direct"?"Volume commandé":"Volume m³ équiv."}
+                          {u==="m³"?"Volume charge":"Volume commandé"}
                         </span>
-                        <span style={{fontSize:16,fontWeight:700,color:"#34C759",marginLeft:4}}>
+                        <span style={{fontSize:14,fontWeight:700,color:"#34C759"}}>
                           {u==="m³direct"?`${pf(lg.quantite)||0} m³`:vol+" m³"}
                         </span>
                       </div>}
-                      {/* Nb d'unités calculé pour m³direct */}
-                      {u==="m³direct"&&(()=>{
-                        const n=nbUnitesM3Direct(lg);
-                        if(n==null) return <div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
-                          ⚠ Renseignez les dimensions pour calculer le nombre de pièces
-                        </div>;
-                        const volU=round((pf(lg.epaisseur)/1000)*(pf(lg.largeur)/1000)*pf(lg.longueur),6);
-                        return <div style={{marginTop:4,padding:"4px 8px",background:"rgba(10,132,255,.08)",borderRadius:6,border:"1px solid rgba(10,132,255,.2)"}}>
-                          <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Nb de pièces nécessaires </span>
-                          <span style={{fontSize:16,fontWeight:700,color:"#0A84FF"}}>{n} pièces</span>
-                          <span style={{fontSize:11,color:"#8A9BB0",marginLeft:6}}>({volU} m³/u. × {n} = {round(volU*n,4)} m³)</span>
-                        </div>;
-                      })()}
                       {u!=="m³"&&vol==null&&<div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
                         ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
                       </div>}
