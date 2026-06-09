@@ -490,7 +490,7 @@ function UniteSel({value,onChange}){
 
 function Card({title,children,accent,style}){ return <div style={{...S.card,...(accent?{borderColor:accent}:{}),...(style||{})}}>{title&&<div style={S.cardTitle}>{title}</div>}{children}</div>; }
 function Badge({status}){
-  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"]};
+  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"],brouillon:["#1A1A2E","#9B59F7"]};
   const [bg,fg]=map[status]||map.attente;
   return <span style={{background:bg,color:fg,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,whiteSpace:"nowrap",letterSpacing:"0.02em"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée"}[status]||status}</span>;
 }
@@ -801,10 +801,11 @@ export default function App(){
     setFreeExp(x=>({...x,[e.id]:false}));
   };
 
+  const cmdBrouillon=commandes.filter(c=>c.statut==="brouillon");
   const cmdAtt=commandes.filter(c=>["attente","En attente"].includes(c.statut));
   const cmdProd=commandes.filter(c=>["production","En production"].includes(c.statut));
   const cmdVal=commandes.filter(c=>["valide","Validée"].includes(c.statut));
-  const aRealiser=[...cmdAtt,...cmdProd];
+  const aRealiser=[...cmdAtt,...cmdProd]; // brouillon exclu volontairement
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDU
@@ -831,6 +832,18 @@ export default function App(){
             </div>
             <button style={{...S.btnSmall,fontSize:11,color:"#FF453A",borderColor:"rgba(255,69,58,.2)"}} onClick={()=>{setEditCmd(null);setForm(initCmd);}}>✕ Annuler</button>
           </div>}
+          {!editCmd&&form.client&&localStorage.getItem("cubeur_draft")&&
+            <div style={{background:"rgba(10,132,255,.07)",border:"1px solid rgba(10,132,255,.25)",borderRadius:10,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,color:"#0A84FF",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em"}}>📋 Brouillon en cours</div>
+                <div style={{fontSize:12,color:"#E8ECEF",marginTop:2}}>Client : <strong>{form.client||"—"}</strong> · {form.lignes.length} produit{form.lignes.length>1?"s":""}</div>
+              </div>
+              <button style={{...S.btnSmall,fontSize:11,color:"#FF453A",borderColor:"rgba(255,69,58,.2)"}}
+                onClick={()=>{setForm(initCmd);localStorage.removeItem("cubeur_draft");}}>
+                🗑 Effacer
+              </button>
+            </div>
+          }
           <Card title="Informations commande">
             <Field label="Client / chantier" style={{marginBottom:12}}>
               <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont - Chalet Megève"/>
@@ -1015,10 +1028,33 @@ export default function App(){
           </Card>
           {/* Boutons Mettre de côté + Envoyer */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:4}}>
-            <button style={{...S.btnBig,marginBottom:0,background:"rgba(255,159,10,.08)",color:"#FF9F0A",border:"1px solid rgba(255,159,10,.3)"}}
-              onClick={()=>{
+            <button style={{...S.btnBig,marginBottom:0,background:"rgba(155,89,247,.08)",color:"#9B59F7",border:"1px solid rgba(155,89,247,.3)",...(!form.client?S.btnDis:{})}}
+              disabled={!form.client}
+              onClick={async()=>{
+                // Sauvegarder localement
                 localStorage.setItem("cubeur_draft",JSON.stringify(form));
-                showToast("Brouillon sauvegardé ✓","warn");
+                // Si scriptUrl dispo, envoyer en Sheet avec statut brouillon
+                if(scriptUrl&&form.client){
+                  const bid=editCmd||genId();
+                  const dc=fmtDate();
+                  if(editCmd){ try{ await callScript(scriptUrl,{type:"deleteCommande",id:editCmd}); }catch(e){} }
+                  const rows=form.lignes.map((l,i)=>[
+                    i===0?bid:"", form.client, l.produit||"", l.essence||"", l.qualite||"",
+                    l.epaisseur||"", l.largeur||"", l.longueur||"", l.quantite||"",
+                    form.dateLivraison||"", i===0?form.notes||"":"", "brouillon", i===0?dc:"",
+                    prodId(bid,i), l.unite||"m³",
+                    l.prixUnitaire||"", l.typePrix||l.unite||"m³", l.typeTaxe||"HT",
+                    i===0?form.adresseClient||"":"", i===0?form.adresseLivraison||"":""
+                  ]);
+                  try{
+                    await callScript(scriptUrl,{type:"commande",rows,id:bid});
+                    setEditCmd(bid);
+                    showToast("Commande mise de côté ✓","warn");
+                    setTimeout(()=>load(true),800);
+                  }catch(e){ showToast("Sauvegardé localement seulement","warn"); }
+                } else {
+                  showToast("Brouillon sauvegardé localement ✓","warn");
+                }
               }}>
               ⏸ Mettre de côté
             </button>
@@ -1033,8 +1069,57 @@ export default function App(){
           </button>
 
           {commandes.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>
             <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
+            {cmdBrouillon.length>0&&<>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#9B59F7",margin:"20px 0 8px",paddingBottom:5,borderBottom:"1px solid rgba(155,89,247,.15)"}}>✏️ À finaliser ({cmdBrouillon.length})</div>
+              {cmdBrouillon.map(c=>(
+                <Card key={c.id} accent="rgba(155,89,247,.25)">
+                  {confirmDel===c.id?(
+                    <div style={{textAlign:"center",padding:"8px 0"}}>
+                      <div style={{color:"#e07a5f",fontSize:13,marginBottom:12}}>Supprimer <strong>{c.id}</strong> ?</div>
+                      <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                        <button style={{...S.btnSmall,color:"#e07a5f",borderColor:"rgba(224,122,95,.4)"}} onClick={()=>supprimerCommande(c.id)} disabled={deleting}>{deleting?<Spinner/>:"Confirmer"}</button>
+                        <button style={S.btnSmall} onClick={()=>setConfirmDel(null)}>Annuler</button>
+                      </div>
+                    </div>
+                  ):(
+                    <>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                        <div><div style={{fontSize:11,color:"#9B59F7",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}</div></div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}><Badge status="brouillon"/><button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button></div>
+                      </div>
+                      {(c.lignes||[]).map((l,i)=>(
+                        <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
+                          • <strong style={{color:"#9B59F7"}}>{l.produit||"—"}</strong>{l.essence?` · ${l.essence}`:""}
+                          <span style={{color:"#5bb8d4",fontSize:11}}> [{l.unite||"m³"}]</span>
+                        </div>
+                      ))}
+                      {c.dateLivraison&&<div style={{fontSize:12,color:"#8A9BB0",marginTop:6,marginBottom:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500,fontSize:13}}>{(d=>d?new Date(d).toLocaleDateString("fr-FR"):"—")(c.dateLivraison)}</strong></div>}
+                      <button style={{...S.btnBig,marginBottom:0,background:"rgba(155,89,247,.1)",color:"#9B59F7",border:"1px solid rgba(155,89,247,.3)",fontSize:13}}
+                        onClick={()=>{
+                          setForm({
+                            client:c.client||"",dateLivraison:c.dateLivraison||c.datelivraison||"",
+                            notes:c.notes||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",
+                            lignes:(c.lignes||[]).map(l=>({
+                              produit:l.produit||"",essence:l.essence||"",qualite:l.qualite||"",
+                              epaisseur:l.epaisseur||"",largeur:l.largeur||"",longueur:l.longueur||"",
+                              quantite:l.quantite||"",unite:l.unite||"m³",
+                              prixUnitaire:l.prixUnitaire||"",typePrix:l.typePrix||l.unite||"m³",typeTaxe:l.typeTaxe||"HT"
+                            }))
+                          });
+                          setEditCmd(c.id);
+                          setTab("commande");
+                          window.scrollTo(0,0);
+                          showToast(`Brouillon ${c.id} chargé — finalisez et envoyez`,"warn");
+                        }}>
+                        ✏️ Reprendre et finaliser
+                      </button>
+                    </>
+                  )}
+                </Card>
+              ))}
+            </>}
+            {(cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
             {commandes.map(c=>(
               <Card key={c.id}>
                 {confirmDel===c.id?(
