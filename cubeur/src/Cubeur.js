@@ -1251,7 +1251,7 @@ export default function App(){
               ))}
             </>}
             {(cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
-            {commandes.map(c=>(
+            {commandes.filter(c=>c.statut!=='brouillon').map(c=>(
               <Card key={c.id}>
                 {confirmDel===c.id?(
                   <div style={{textAlign:"center",padding:"8px 0"}}>
