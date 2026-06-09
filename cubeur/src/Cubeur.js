@@ -12,7 +12,7 @@ const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
-const initCmd   = { client:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",lignes:[{...initLigne}] };
+const initCmd   = { client:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -400,13 +400,30 @@ async function genererDevisPDF(form, cmdId){
   });
 
   y += 8;
-  // S'assurer qu'il reste de la place pour TVA+Récap+Mentions (~80mm)
-  y = checkPage(y, 80);
-  const tva = round(totalHT*0.20, 2);
-  const ttc = round(totalHT+tva, 2);
+  y = checkPage(y, 90);
+  const remisePct = pf(form.remise)||0;
+  const remiseMt  = remisePct>0 ? round(totalHT*remisePct/100, 2) : 0;
+  const baseHTApres = round(totalHT - remiseMt, 2);
+  const tva = round(baseHTApres*0.20, 2);
+  const ttc = round(baseHTApres+tva, 2);
+
+  // ── Ligne remise dans le tableau (si remise) ──
+  if(remiseMt>0){
+    doc.setFillColor(255,248,240);
+    doc.rect(14, y, 182, 8, "F");
+    doc.setFont("helvetica","italic");
+    doc.setFontSize(8.5);
+    doc.setTextColor(...GRIS);
+    doc.text(`Remise commerciale ${remisePct}%`, CL.prod+1, y+5.5);
+    doc.setTextColor(200,60,40);
+    doc.setFont("helvetica","bold");
+    doc.text(`- ${fmtNum(remiseMt)} €`, CL.total, y+5.5, {align:"right"});
+    doc.setDrawColor(...GRIS_CLAIR); doc.setLineWidth(0.2);
+    doc.line(14, y+8, 196, y+8);
+    y += 10;
+  }
 
   // ── Détails TVA + Récapitulatif côte à côte ──
-  // Détails TVA (gauche)
   doc.setFont("helvetica","bold");
   doc.setFontSize(11);
   doc.setTextColor(OR_R, OR_G, OR_B);
@@ -423,7 +440,7 @@ async function genererDevisPDF(form, cmdId){
   doc.setFont("helvetica","normal");
   doc.text("20%", 14, y+15);
   doc.text(`${fmtNum(tva)} €`, 40, y+15);
-  doc.text(`${fmtNum(totalHT)} €`, 80, y+15);
+  doc.text(`${fmtNum(baseHTApres)} €`, 80, y+15);
 
   // Récapitulatif (droite)
   doc.setFont("helvetica","bold");
@@ -433,18 +450,32 @@ async function genererDevisPDF(form, cmdId){
   doc.setFontSize(8.5);
   doc.setTextColor(...NOIR);
   doc.setFont("helvetica","normal");
-  doc.text("Total HT", 130, y+8);
+  doc.text("Total HT brut", 130, y+8);
   doc.text(`${fmtNum(totalHT)} €`, 196, y+8, {align:"right"});
-  doc.text("Total TVA", 130, y+14);
-  doc.text(`${fmtNum(tva)} €`, 196, y+14, {align:"right"});
+  let yRecap = y+8;
+  if(remiseMt>0){
+    yRecap+=6;
+    doc.setTextColor(200,60,40);
+    doc.text(`Remise ${remisePct}%`, 130, yRecap);
+    doc.text(`- ${fmtNum(remiseMt)} €`, 196, yRecap, {align:"right"});
+    yRecap+=6;
+    doc.setTextColor(...NOIR);
+    doc.text("Total HT net", 130, yRecap);
+    doc.text(`${fmtNum(baseHTApres)} €`, 196, yRecap, {align:"right"});
+    yRecap+=6;
+  } else {
+    yRecap+=6;
+  }
+  doc.text("Total TVA", 130, yRecap);
+  doc.text(`${fmtNum(tva)} €`, 196, yRecap, {align:"right"});
   doc.setDrawColor(...GRIS_CLAIR); doc.setLineWidth(0.3);
-  doc.line(130, y+16, 196, y+16);
+  doc.line(130, yRecap+2, 196, yRecap+2);
   doc.setFont("helvetica","bold");
   doc.setFontSize(10);
-  doc.text("Total TTC", 130, y+22);
-  doc.text(`${fmtSpace(ttc)} €`, 196, y+22, {align:"right"});
+  doc.text("Total TTC", 130, yRecap+8);
+  doc.text(`${fmtSpace(ttc)} €`, 196, yRecap+8, {align:"right"});
 
-  y += 35;
+  y = yRecap+20;
 
   // ── Livraison ──
   if(form.dateLivraison){
@@ -640,7 +671,8 @@ export default function App(){
       l.typePrix||l.unite||"m³",
       l.typeTaxe||"HT",
       i===0?form.adresseClient||"":"",
-      i===0?form.adresseLivraison||"":""
+      i===0?form.adresseLivraison||"":"",
+      i===0?form.remise||"":""
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1067,6 +1099,60 @@ export default function App(){
           <Card title="Notes">
             <textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={form.notes} onChange={sf("notes")} placeholder="Instructions particulières..."/>
           </Card>
+
+          {/* Remise */}
+          <Card title="Remise (optionnel)">
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <Field label="% de remise" style={{flex:1}}>
+                <Num value={form.remise||""} onChange={sf("remise")} ph="ex: 10"/>
+              </Field>
+              <div style={{flex:1,fontSize:11,color:"#8A9BB0",paddingTop:18,lineHeight:1.5}}>
+                Sera affiché sur le devis et déduit du total HT
+              </div>
+            </div>
+          </Card>
+
+          {/* Récapitulatif commande */}
+          {(()=>{
+            const lignesAvecPrix=form.lignes.filter(l=>l.prixUnitaire&&pf(l.prixUnitaire)>0);
+            const totalVol=form.lignes.reduce((acc,l)=>{const v=volLigneM3(l);return acc+(v||0);},0);
+            const totalVolRound=round(totalVol,4);
+            const totalHT=form.lignes.reduce((acc,l)=>{
+              const h=ligneHT(l);
+              const isTTC=(l.typeTaxe||"HT")==="TTC";
+              if(h==null) return acc;
+              return acc+round(isTTC?round(h/1.2,2):h,2);
+            },0);
+            const remisePct=pf(form.remise);
+            const remiseMt=remisePct>0?round(totalHT*remisePct/100,2):0;
+            const totalApresRemise=round(totalHT-remiseMt,2);
+            const totalTTC=round(totalApresRemise*1.2,2);
+            if(totalVol===0&&lignesAvecPrix.length===0) return null;
+            return <div style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(212,168,83,.2)",borderRadius:12,padding:"14px 16px",marginBottom:4}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#C4904A",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>📊 Récapitulatif commande</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                {totalVolRound>0&&<div style={{background:"rgba(52,199,89,.06)",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",marginBottom:4}}>Volume total m³</div>
+                  <div style={{fontSize:22,fontWeight:700,color:"#34C759"}}>{totalVolRound} m³</div>
+                </div>}
+                {totalHT>0&&<div style={{background:"rgba(255,159,10,.06)",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",marginBottom:4}}>Total HT</div>
+                  <div style={{fontSize:22,fontWeight:700,color:"#FF9F0A"}}>{totalHT.toFixed(2)} €</div>
+                  <div style={{fontSize:11,color:"#8A9BB0",marginTop:2}}>TTC : {round(totalHT*1.2,2).toFixed(2)} €</div>
+                </div>}
+                {remiseMt>0&&<div style={{background:"rgba(255,69,58,.06)",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",marginBottom:4}}>Remise {remisePct}%</div>
+                  <div style={{fontSize:18,fontWeight:700,color:"#FF453A"}}>- {remiseMt.toFixed(2)} €</div>
+                </div>}
+                {remiseMt>0&&<div style={{background:"rgba(10,132,255,.06)",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",marginBottom:4}}>Après remise HT</div>
+                  <div style={{fontSize:18,fontWeight:700,color:"#0A84FF"}}>{totalApresRemise.toFixed(2)} €</div>
+                  <div style={{fontSize:11,color:"#8A9BB0",marginTop:2}}>TTC : {totalTTC.toFixed(2)} €</div>
+                </div>}
+              </div>
+            </div>;
+          })()}
+
           {/* Boutons Mettre de côté + Envoyer */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:4}}>
             <button style={{...S.btnBig,marginBottom:0,background:"rgba(155,89,247,.08)",color:"#9B59F7",border:"1px solid rgba(155,89,247,.3)",...(!form.client?S.btnDis:{})}}
@@ -1085,7 +1171,8 @@ export default function App(){
                     form.dateLivraison||"", i===0?form.notes||"":"", "brouillon", i===0?dc:"",
                     prodId(bid,i), l.unite||"m³",
                     l.prixUnitaire||"", l.typePrix||l.unite||"m³", l.typeTaxe||"HT",
-                    i===0?form.adresseClient||"":"", i===0?form.adresseLivraison||"":""
+                    i===0?form.adresseClient||"":"", i===0?form.adresseLivraison||"":"",
+                    i===0?form.remise||"":""
                   ]);
                   try{
                     await callScript(scriptUrl,{type:"commande",rows,id:bid});
@@ -1620,10 +1707,11 @@ export default function App(){
         typePrix:o["typePrix"]||o["unite"]||"m³",
         typeTaxe:o["typeTaxe"]||"HT"
       });
-      // Adresses sur la 1ère ligne du bloc
+      // Adresses + remise sur la 1ère ligne du bloc
       if(String(o["id"]||"").trim()&&map[cid]){
         if(o["adresseClient"]) map[cid].adresseClient=o["adresseClient"];
         if(o["adresseLivraison"]) map[cid].adresseLivraison=o["adresseLivraison"];
+        if(o["remise"]) map[cid].remise=o["remise"];
       }
     });
     return json({commandes:order.map(function(id){return map[id];})});
