@@ -12,7 +12,7 @@ const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³" };
-const initCmd   = { client:"",dateLivraison:"",notes:"",lignes:[{...initLigne}] };
+const initCmd   = { client:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -217,8 +217,12 @@ async function genererDevisPDF(form, cmdId){
 
   // ── Infos client ──
   let y=42;
+  // Calculer la hauteur selon les infos dispo
+  const hasAddr = form.adresseClient && form.adresseClient.trim();
+  const hasLivr = form.adresseLivraison && form.adresseLivraison.trim();
+  const clientH = 22 + (hasAddr?10:0) + (hasLivr?10:0);
   doc.setFillColor(245,237,224);
-  doc.roundedRect(120,y-5,80,28,2,2,"F");
+  doc.roundedRect(120,y-5,80,clientH,2,2,"F");
   doc.setTextColor(...BRUN);
   doc.setFont("helvetica","bold");
   doc.setFontSize(9);
@@ -227,10 +231,37 @@ async function genererDevisPDF(form, cmdId){
   doc.setTextColor(...NOIR);
   doc.text(form.client||"—",122,y+7);
   doc.setTextColor(...GRIS);
-  doc.text(`Livraison souhaitée : ${form.dateLivraison||"—"}`,122,y+13);
-  if(form.notes) doc.text(form.notes,122,y+19,{maxWidth:76});
+  // Formater la date proprement (ISO → DD/MM/YYYY)
+  const fmtDateLivr = (d) => {
+    if(!d) return "—";
+    try{ const dt=new Date(d); return dt.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"}); }
+    catch(e){ return d; }
+  };
+  doc.text(`Livraison souhaitée : ${fmtDateLivr(form.dateLivraison)}`,122,y+13);
+  let yClient = y+13;
+  if(hasAddr){
+    yClient+=5;
+    doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...BRUN);
+    doc.text("Adresse :",122,yClient);
+    doc.setFont("helvetica","normal"); doc.setTextColor(...NOIR);
+    doc.text(form.adresseClient,140,yClient,{maxWidth:58});
+    yClient+=7;
+  }
+  if(hasLivr){
+    yClient+=3;
+    doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...BRUN);
+    doc.text("Livraison :",122,yClient);
+    doc.setFont("helvetica","normal"); doc.setTextColor(...NOIR);
+    doc.text(form.adresseLivraison,143,yClient,{maxWidth:55});
+    yClient+=7;
+  }
+  if(form.notes){
+    doc.setFontSize(7.5); doc.setTextColor(...GRIS); doc.setFont("helvetica","italic");
+    doc.text(form.notes,122,yClient+3,{maxWidth:76});
+  }
 
   // ── Tableau produits ──
+  y = Math.max(78, y + clientH + 5);
   // Colonnes : Produit(14-68) Essence(69-95) Qualité(96-118) Dims(119-148) Qté(149-162) PU(163-181) Total(182-196)
   // Largeurs :     54              26              22             29            13           18           14
   y=78;
@@ -252,7 +283,7 @@ async function genererDevisPDF(form, cmdId){
   doc.text("Dimensions",  COL.dims+1,    y+5.5);
   doc.text("Qté",         COL.qte+6,     y+5.5, {align:"center"});
   doc.text("P.U. HT",     COL.pu+17,     y+5.5, {align:"right"});
-  doc.text("Total HT",    COL.end,       y+5.5, {align:"right"});
+  doc.text("Total HT",    COL.end-1,     y+5.5, {align:"right"});
   y+=8;
 
   let totalHT=0;
@@ -791,8 +822,14 @@ export default function App(){
             <Field label="Client / chantier" style={{marginBottom:12}}>
               <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont - Chalet Megève"/>
             </Field>
-            <Field label="Date de livraison souhaitée">
+            <Field label="Date de livraison souhaitée" style={{marginBottom:12}}>
               <Inp type="date" value={form.dateLivraison} onChange={sf("dateLivraison")} min={today()}/>
+            </Field>
+            <Field label="Adresse client (optionnel)" style={{marginBottom:12}}>
+              <Inp value={form.adresseClient||""} onChange={sf("adresseClient")} ph="Ex: 15 rue du Moulin, 73000 Chambéry"/>
+            </Field>
+            <Field label="Adresse de livraison (optionnel)">
+              <Inp value={form.adresseLivraison||""} onChange={sf("adresseLivraison")} ph="Identique ou différente"/>
             </Field>
           </Card>
 
