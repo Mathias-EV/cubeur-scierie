@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { jsPDF } from "jspdf";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const SHEET_ID = "1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4";
@@ -137,8 +138,6 @@ function calcul(f){
 
 // ─── GÉNÉRATION DEVIS PDF ─────────────────────────────────────────────────────
 function genererDevisPDF(form, cmdId){
-  // jsPDF est chargé via <script> dans index.html — on utilise window.jspdf
-  const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:"mm", format:"a4" });
   const TVA=0.20;
 
