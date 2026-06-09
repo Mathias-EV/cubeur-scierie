@@ -1003,20 +1003,34 @@ export default function App(){
                 if(!hasQte) return null;
                 return <div style={{background:"rgba(52,199,89,.06)",border:"1px solid rgba(52,199,89,.15)",borderRadius:8,padding:"10px 12px",marginTop:8}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
-                    {/* Colonne gauche : quantité + volume */}
-                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                      {u!=="m³"&&<div>
-                        <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Commandé </span>
-                        <span style={{fontSize:15,fontWeight:700,color:"#0A84FF"}}>{nb} {u}</span>
-                      </div>}
-                      {(u==="m³direct"||vol!=null)&&<div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>
-                          {u==="m³"?"Volume charge":"Volume commandé"}
-                        </span>
-                        <span style={{fontSize:14,fontWeight:700,color:"#34C759"}}>
-                          {u==="m³direct"?`${pf(lg.quantite)||0} m³`:vol+" m³"}
-                        </span>
-                      </div>}
+                    {/* Colonne gauche : volume + nb pièces */}
+                    <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                      {/* Volume commandé — toujours affiché si dispo */}
+                      {(u==="m³"||u==="m³direct")?
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Volume commandé</span>
+                          <span style={{fontSize:14,fontWeight:700,color:"#34C759"}}>
+                            {u==="m³direct"?`${pf(lg.quantite)||0} m³`:vol!=null?vol+" m³":"—"}
+                          </span>
+                        </div>
+                      :
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Commandé</span>
+                          <span style={{fontSize:14,fontWeight:700,color:"#0A84FF"}}>{nb} {u}</span>
+                        </div>
+                      }
+                      {/* Nb pièces sans le calcul */}
+                      {(()=>{
+                        let n=null;
+                        if(u==="m³direct") n=nbUnitesM3Direct(lg);
+                        else if(u==="m²") n=nbUnitesM2(lg);
+                        else if(u==="mL") n=nbUnitesMl(lg);
+                        if(n==null) return null;
+                        return <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Nb de pièces</span>
+                          <span style={{fontSize:14,fontWeight:700,color:"#0A84FF"}}>{n} pièces</span>
+                        </div>;
+                      })()}
                       {u!=="m³"&&vol==null&&<div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
                         ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
                       </div>}
