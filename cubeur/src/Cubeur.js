@@ -1678,7 +1678,7 @@ export default function App(){
           </Card>
           <Card title="Script Apps Script — Version complète">
             <pre style={S.pre}>`function doGet(e) {
-  var ss = SpreadsheetApp.openById("${SHEET_ID}");
+  var ss = SpreadsheetApp.openById("\${SHEET_ID}");
   var action = e.parameter.action;
 
   if(action === "getCommandes") {
