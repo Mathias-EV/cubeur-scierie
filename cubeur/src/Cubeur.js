@@ -17,6 +17,8 @@ const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qu
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const round=(n,d=6)=>Math.round(n*10**d)/10**d;
+// parseFloat qui accepte les virgules françaises (1,5 → 1.5)
+const pf=(v)=>parseFloat(String(v||"").replace(",","."));
 const pct=(n)=>(n*100).toFixed(1)+" %";
 const m3f=(n,u="m³")=>parseFloat(n).toFixed(4)+" "+(u||"m³");
 const genId=()=>"CMD-"+Date.now().toString(36).toUpperCase().slice(-6);
@@ -31,10 +33,10 @@ const prodId=(cmdId,idx)=>`${cmdId}-P${idx+1}`;
 // Pour mL  : quantite = total mL commandé → volume m³ = mL×ep×la (si ep+la dispo)
 function volLigneM3(l){
   const u=l.unite||"m³";
-  const ep=parseFloat(l.epaisseur)/1000;
-  const la=parseFloat(l.largeur)/1000;
-  const lo=parseFloat(l.longueur);
-  const nb=parseFloat(l.quantite);
+  const ep=pf(l.epaisseur)/1000;
+  const la=pf(l.largeur)/1000;
+  const lo=pf(l.longueur);
+  const nb=pf(l.quantite);
   if(!nb||nb<=0) return null;
   if(u==="m³"){
     // Mode classique : volume = ep×la×lo×nb (nb = nb de pièces)
@@ -66,12 +68,12 @@ function qteCommandee(l){
 
 // Calcul HT selon le type de prix choisi (gère HT et TTC)
 function ligneHT(l){
-  let p=parseFloat(l.prixUnitaire);
+  let p=pf(l.prixUnitaire);
   if(!p||p<=0) return null;
   // Si le prix saisi est TTC, le ramener en HT
   if((l.typeTaxe||"HT")==="TTC") p=round(p/1.2,4);
   const tp=l.typePrix||l.unite||"m³";
-  const nb=parseFloat(l.quantite);
+  const nb=pf(l.quantite);
   if(!nb||nb<=0) return null;
 
   if(tp==="m³"){
@@ -98,11 +100,11 @@ function ligneHT(l){
 //   m²  : la×lo×nb (surface)
 //   mL  : lo×nb (linéaire)
 function calculParUnite(p){
-  const ep=parseFloat(p.epaisseur)/1000;
-  const la=parseFloat(p.largeur)/1000;
-  const lo=parseFloat(p.longueur);
-  const nb=parseFloat(p.nbUnites);
-  const vg=parseFloat(p.volumeGrume);
+  const ep=pf(p.epaisseur)/1000;
+  const la=pf(p.largeur)/1000;
+  const lo=pf(p.longueur);
+  const nb=pf(p.nbUnites);
+  const vg=pf(p.volumeGrume);
   const unite=p.unite||"m³";
 
   // m³ : toutes les dims + nb obligatoires
@@ -268,10 +270,8 @@ async function genererDevisPDF(form, cmdId){
   }
 
   // ── Tableau produits ──
-  y = Math.max(90, y + clientH + 8);
-  // Colonnes : Produit(14-68) Essence(69-95) Qualité(96-118) Dims(119-148) Qté(149-162) PU(163-181) Total(182-196)
-  // Largeurs :     54              26              22             29            13           18           14
-  y=78;
+  // y positionné APRÈS le bloc client avec marge de sécurité
+  y = Math.max(y + clientH + 12, 42 + clientH + 12);
   // Colonnes (modèle devis client) :
   // Désignation(14-80) | Essence(81-110) | Qté(111-130) | P.U.HT(131-155) | TVA%(156-168) | Total HT(169-196)
   const COL={
@@ -297,7 +297,7 @@ async function genererDevisPDF(form, cmdId){
     const ht=ligneHT(l);
     const vol=volLigneM3(l);
     const u=l.unite||"m³";
-    const nb=parseFloat(l.quantite)||0;
+    const nb=pf(l.quantite)||0;
     const tp=l.typePrix||u;
     const isTTCpdf=(l.typeTaxe||"HT")==="TTC";
     const htVal=ht!=null?(isTTCpdf?round(ht/1.2,2):ht):null;
@@ -359,7 +359,7 @@ async function genererDevisPDF(form, cmdId){
     doc.setFont("helvetica","normal");
     doc.setTextColor(...NOIR);
     if(l.prixUnitaire){
-      const puNum=parseFloat(l.prixUnitaire);
+      const puNum=pf(l.prixUnitaire);
       const puHT=isTTCpdf?round(puNum/1.2,2):puNum;
       doc.text(`${puHT.toFixed(2)} €`, COL.pu+12, midY, {align:"center"});
       doc.setFontSize(6.5);
@@ -940,7 +940,7 @@ export default function App(){
                 const u=lg.unite||"m³";
                 const vol=volLigneM3(lg);
                 const ht=ligneHT(lg);
-                const nb=parseFloat(lg.quantite);
+                const nb=pf(lg.quantite);
                 const hasQte=nb>0;
                 if(!hasQte) return null;
                 return <div style={{background:"rgba(52,199,89,.06)",border:"1px solid rgba(52,199,89,.15)",borderRadius:8,padding:"10px 12px",marginTop:8}}>
