@@ -399,7 +399,6 @@ async function genererDevisPDF(form, cmdId){
     y += 8;
   });
 
-  y += 8;
   y = checkPage(y, 90);
   const remisePct = pf(form.remise)||0;
   const remiseMt  = remisePct>0 ? round(totalHT*remisePct/100, 2) : 0;
@@ -407,20 +406,21 @@ async function genererDevisPDF(form, cmdId){
   const tva = round(baseHTApres*0.20, 2);
   const ttc = round(baseHTApres+tva, 2);
 
-  // ── Ligne remise dans le tableau (si remise) ──
+  // ── Ligne remise séparée sous le tableau ──
   if(remiseMt>0){
-    doc.setFillColor(255,248,240);
-    doc.rect(14, y, 182, 8, "F");
+    y += 4; // espace après le tableau
+    doc.setFillColor(255,245,242);
+    doc.roundedRect(14, y, 182, 9, 1, 1, "F");
     doc.setFont("helvetica","italic");
     doc.setFontSize(8.5);
     doc.setTextColor(...GRIS);
-    doc.text(`Remise commerciale ${remisePct}%`, CL.prod+1, y+5.5);
+    doc.text(`Remise commerciale ${remisePct}%`, CL.prod+1, y+6);
     doc.setTextColor(200,60,40);
     doc.setFont("helvetica","bold");
-    doc.text(`- ${fmtNum(remiseMt)} €`, CL.total, y+5.5, {align:"right"});
-    doc.setDrawColor(...GRIS_CLAIR); doc.setLineWidth(0.2);
-    doc.line(14, y+8, 196, y+8);
-    y += 10;
+    doc.text(`- ${fmtNum(remiseMt)} €`, CL.total, y+6, {align:"right"});
+    y += 14; // espace après la ligne remise
+  } else {
+    y += 8;
   }
 
   // ── Détails TVA + Récapitulatif côte à côte ──
