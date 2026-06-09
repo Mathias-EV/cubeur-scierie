@@ -201,6 +201,24 @@ async function genererDevisPDF(form, cmdId){
 
   // ── Helpers ──
   const fmtNum = (n) => n.toFixed(2).replace(".", ",");
+  const PAGE_H = 297; // A4 hauteur mm
+  const MARGIN_BOTTOM = 30; // zone réservée en bas (footer + mentions)
+  const MAX_Y = PAGE_H - MARGIN_BOTTOM;
+
+  // Nouvelle page si nécessaire, retourne le nouveau y
+  const checkPage = (yPos, neededH=10) => {
+    if(yPos + neededH > MAX_Y){
+      doc.addPage();
+      // Footer sur la nouvelle page aussi
+      doc.setFontSize(7); doc.setFont("helvetica","normal");
+      doc.setTextColor(140,140,140);
+      doc.text("EXPLOITATION VERDON | Entrepreneur individuel | N° SIREN 881.432.348 | N° de TVA FR38881432348", 105, 290, {align:"center"});
+      doc.setDrawColor(200,200,200); doc.setLineWidth(0.2);
+      doc.line(14, 285, 196, 285);
+      return 14; // y repart du haut
+    }
+    return yPos;
+  };
   const fmtSpace = (n) => {
     const s=fmtNum(n); const [int,dec]=s.split(",");
     return int.replace(/\B(?=(\d{3})+(?!\d))/g," ")+","+dec;
@@ -346,6 +364,21 @@ async function genererDevisPDF(form, cmdId){
     else if(u==="mL") qteStr=vol!=null?`${nb} mL (${vol} m³)`:`${nb} mL`;
     else qteStr=`${nb} u.`;
 
+    // Nouvelle page si besoin
+    y = checkPage(y, 9);
+    // Ré-afficher l'en-tête tableau si on vient de changer de page
+    if(y < 20){
+      doc.setFillColor(240,236,228);
+      doc.rect(14, y, 182, 7, "F");
+      doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...NOIR);
+      doc.text("Produits", CL.prod+1, y+5);
+      doc.text("Qté", (CL.qte+CL.pu)/2, y+5, {align:"center"});
+      doc.text("Prix u. HT", (CL.pu+CL.tva)/2, y+5, {align:"center"});
+      doc.text("TVA (%)", (CL.tva+CL.total)/2-4, y+5, {align:"center"});
+      doc.text("Total HT", CL.total, y+5, {align:"right"});
+      y += 7;
+    }
+
     const bg = i%2===0 ? BG_LIGNE1 : BG_LIGNE2;
     doc.setFillColor(...bg);
     doc.rect(14, y, 182, 8, "F");
@@ -367,6 +400,8 @@ async function genererDevisPDF(form, cmdId){
   });
 
   y += 8;
+  // S'assurer qu'il reste de la place pour TVA+Récap+Mentions (~80mm)
+  y = checkPage(y, 80);
   const tva = round(totalHT*0.20, 2);
   const ttc = round(totalHT+tva, 2);
 
@@ -421,7 +456,7 @@ async function genererDevisPDF(form, cmdId){
   }
 
   // ── Mentions légales ──
-  y = Math.max(y, 230);
+  y = checkPage(y, 40); // s'assurer assez de place
   doc.setDrawColor(...GRIS_CLAIR); doc.setLineWidth(0.3);
   doc.line(14, y, 196, y); y+=5;
   doc.setFont("helvetica","normal");
@@ -439,13 +474,19 @@ async function genererDevisPDF(form, cmdId){
   doc.setFont("helvetica","italic");
   doc.text("« Bon pour accord »", 14, y);
 
-  // ── Footer ──
-  doc.setFontSize(7);
-  doc.setFont("helvetica","normal");
-  doc.setTextColor(...GRIS);
-  doc.text("EXPLOITATION VERDON | Entrepreneur individuel | N° SIREN 881.432.348 | N° de TVA FR38881432348", 105, 290, {align:"center"});
-  doc.setDrawColor(...GRIS_CLAIR); doc.setLineWidth(0.2);
-  doc.line(14, 285, 196, 285);
+  // ── Footer sur la dernière page ──
+  const totalPages = doc.getNumberOfPages();
+  for(let pg=1; pg<=totalPages; pg++){
+    doc.setPage(pg);
+    doc.setFontSize(7); doc.setFont("helvetica","normal");
+    doc.setTextColor(...GRIS);
+    doc.text("EXPLOITATION VERDON | Entrepreneur individuel | N° SIREN 881.432.348 | N° de TVA FR38881432348", 105, 290, {align:"center"});
+    doc.setDrawColor(...GRIS_CLAIR); doc.setLineWidth(0.2);
+    doc.line(14, 285, 196, 285);
+    if(totalPages>1){
+      doc.text(`Page ${pg}/${totalPages}`, 196, 290, {align:"right"});
+    }
+  }
 
   // ── Téléchargement ──
   const blob = doc.output('blob');
