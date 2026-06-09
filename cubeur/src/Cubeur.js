@@ -8,7 +8,7 @@ const APPS_SCRIPT_URL_KEY = "cubeur_script_url";
 const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau"];
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
 const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
-const UNITES   = ["m³","m²","mL","unité"];
+const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
@@ -74,10 +74,14 @@ function ligneHT(l){
   const nb=parseFloat(l.quantite);
   if(!nb||nb<=0) return null;
 
-  if(tp==="m³"||tp==="m³direct"){
+  if(tp==="m³"){
     const v=volLigneM3(l);
     if(v==null) return null;
     return round(v*p,2);
+  } else if(tp==="m³direct"){
+    // Prix au m³, quantite = volume total commandé
+    if(!nb||nb<=0) return null;
+    return round(nb*p,2);
   } else if(tp==="m²"){
     return round(nb*p,2);
   } else if(tp==="mL"){
@@ -264,7 +268,7 @@ async function genererDevisPDF(form, cmdId){
   }
 
   // ── Tableau produits ──
-  y = Math.max(78, y + clientH + 5);
+  y = Math.max(90, y + clientH + 8);
   // Colonnes : Produit(14-68) Essence(69-95) Qualité(96-118) Dims(119-148) Qté(149-162) PU(163-181) Total(182-196)
   // Largeurs :     54              26              22             29            13           18           14
   y=78;
@@ -309,7 +313,8 @@ async function genererDevisPDF(form, cmdId){
 
     // ── Quantité ──
     let qTxt="";
-    if(u==="m³"||u==="m³direct") qTxt=vol!=null?`${vol} m³`:`${nb} m³`;
+    if(u==="m³") qTxt=vol!=null?`${vol} m³`:`${nb} u.`;
+    else if(u==="m³direct") qTxt=`${nb} m³`;
     else if(u==="m²") qTxt=`${nb} m²${vol!=null?" ("+vol+" m³)":""}`;
     else if(u==="mL") qTxt=`${nb} mL${vol!=null?" ("+vol+" m³)":""}`;
     else qTxt=`${nb} u.`;
@@ -589,7 +594,7 @@ export default function App(){
   // ─────────────────────────────────────────────────────────────────────────────
   const sf=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
   const sl=(i,f)=>e=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],[f]:e.target.value};return{...p,lignes:ls};});
-  const slv=(i,v)=>{const tp=v==="m³direct"?"m³":v==="unité"?"unité":v; setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:tp,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});};
+  const slv=(i,v)=>{const tp=v==="m³direct"?"m³direct":v; setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:tp,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});};
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
   const formValid=form.client&&form.dateLivraison&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
@@ -846,7 +851,7 @@ export default function App(){
               {/* Unité de mesure */}
               <Field label="Unité de mesure" style={{marginBottom:12}}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:5}}>
-                  {[["m³","m³ pièces"],["m³direct","m³ direct"],["m²","m²"],["mL","mL"],["unité","Unité"]].map(([v,lb])=>(
+                  {[["m³","Unité"],["m³direct","m³"],["m²","m²"],["mL","mL"]].map(([v,lb])=>(
                     <button key={v} type="button" onClick={()=>slv(i,v)}
                       style={{padding:"7px 2px",fontSize:11,fontWeight:600,fontFamily:"inherit",
                         borderRadius:7,cursor:"pointer",lineHeight:1.3,
@@ -865,8 +870,8 @@ export default function App(){
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
-              {/* Dimensions selon unité — toujours affichées sauf "unité" */}
-              {lg.unite==="unité"?null:(
+              {/* Dimensions selon unité — toujours affichées */}
+              {false?null:(
                 (lg.unite==="m³"||lg.unite==="m³direct")?(
                   <Row3>
                     <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
@@ -884,8 +889,8 @@ export default function App(){
               {/* Quantité / Total commandé */}
               {(()=>{
                 const u=lg.unite||"m³";
-                const lbl=u==="m³"?"Quantité (nb de pièces)":u==="m³direct"?"Total commandé (m³)":u==="m²"?"Total commandé (m²)":u==="mL"?"Total commandé (mL)":"Quantité (nb d'unités)";
-                const ph=u==="m³"?"100":u==="m³direct"?"ex: 2.5":u==="m²"?"ex: 15":u==="mL"?"ex: 50":"ex: 10";
+                const lbl=u==="m³"?"Quantité (nb d'unités)":u==="m³direct"?"Total commandé (m³)":u==="m²"?"Total commandé (m²)":"Total commandé (mL)";
+                const ph=u==="m³"?"100":u==="m³direct"?"ex: 2.5":u==="m²"?"ex: 15":"ex: 50";
                 return <Field label={lbl} style={{marginTop:10}}>
                   <Num value={lg.quantite} onChange={sl(i,"quantite")} ph={ph}/>
                 </Field>;
@@ -898,7 +903,7 @@ export default function App(){
                 <div style={{display:"flex",gap:5,marginBottom:10}}>
                   {(()=>{
                     const u=lg.unite||"m³";
-                    const opts=u==="m³"?["m³","unité"]:u==="m³direct"?["m³"]:u==="m²"?["m²","m³","unité"]:u==="mL"?["mL","m³","unité"]:["unité"];
+                    const opts=u==="m³"?["m³"]:u==="m³direct"?["m³"]:u==="m²"?["m²","m³"]:["mL","m³"];
                     return opts.map(tp=>(
                       <button key={tp} type="button"
                         onClick={()=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],typePrix:tp};return{...p,lignes:ls};})}
@@ -946,11 +951,13 @@ export default function App(){
                         <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Commandé </span>
                         <span style={{fontSize:15,fontWeight:700,color:"#0A84FF"}}>{nb} {u}</span>
                       </div>}
-                      {vol!=null&&<div>
+                      {(u==="m³direct"||vol!=null)&&<div>
                         <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>
-                          {u==="m³"?"Volume charge":"Volume m³ équiv."}
+                          {u==="m³"?"Volume charge":u==="m³direct"?"Volume commandé":"Volume m³ équiv."}
                         </span>
-                        <span style={{fontSize:u==="m³"?16:14,fontWeight:700,color:"#34C759",marginLeft:4}}>{vol} m³</span>
+                        <span style={{fontSize:16,fontWeight:700,color:"#34C759",marginLeft:4}}>
+                          {u==="m³direct"?`${parseFloat(lg.quantite)||0} m³`:vol+" m³"}
+                        </span>
                       </div>}
                       {u!=="m³"&&vol==null&&<div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
                         ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
