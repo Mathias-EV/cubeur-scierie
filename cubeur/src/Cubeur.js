@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { jsPDF } from "jspdf";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const SHEET_ID = "1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4";
@@ -137,8 +136,24 @@ function calcul(f){
 }
 
 // ─── GÉNÉRATION DEVIS PDF ─────────────────────────────────────────────────────
-function genererDevisPDF(form, cmdId){
-  const doc = new jsPDF({ unit:"mm", format:"a4" });
+async function genererDevisPDF(form, cmdId){
+  // Charger jsPDF dynamiquement depuis CDN si pas encore disponible
+  if(!window._jsPDF){
+    await new Promise((resolve,reject)=>{
+      if(document.querySelector('script[data-jspdf]')){ resolve(); return; }
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      s.setAttribute('data-jspdf','1');
+      s.onload=()=>{ window._jsPDF=window.jspdf.jsPDF; resolve(); };
+      s.onerror=()=>reject(new Error('jsPDF CDN indisponible'));
+      document.head.appendChild(s);
+    });
+  } else if(!window._jsPDF && window.jspdf){
+    window._jsPDF=window.jspdf.jsPDF;
+  }
+  const JsPDF = window._jsPDF || (window.jspdf&&window.jspdf.jsPDF);
+  if(!JsPDF){ alert("Impossible de charger le générateur PDF. Vérifiez votre connexion internet."); return; }
+  const doc = new JsPDF({ unit:"mm", format:"a4" });
   const TVA=0.20;
 
   // Couleurs
@@ -468,7 +483,7 @@ export default function App(){
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
-      try{ genererDevisPDF({...form,lignes:[...form.lignes]}, id); }catch(pdfErr){ console.warn("PDF:",pdfErr); }
+      try{ await genererDevisPDF({...form,lignes:[...form.lignes]}, id); }catch(pdfErr){ console.warn("PDF:",pdfErr); }
       setForm(initCmd);
       showToast(`Commande ${id} envoyée — devis téléchargé ✓`);
       setTimeout(()=>load(true),1000);
@@ -830,7 +845,7 @@ export default function App(){
                     ))}
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500}}>{c.dateLivraison||c.datelivraison}</strong></div>
                       <button style={{...S.btnExport,fontSize:11,padding:"4px 10px",marginTop:4}}
-                        onClick={()=>genererDevisPDF(c,c.id)}>📄 Devis PDF</button>
+                        onClick={()=>genererDevisPDF(c,c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis PDF</button>
                   </>
                 )}
               </Card>
