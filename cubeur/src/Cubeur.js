@@ -621,14 +621,19 @@ export default function App(){
   const markExported=id=>{ exportedSet.add(id); localStorage.setItem("exported_ids",JSON.stringify([...exportedSet])); };
 
   // ── Charger commandes ──
+  const [loadError,setLoadError]=useState(null);
   const load=useCallback(async(silent=false)=>{
     if(!scriptUrl)return;
-    if(!silent)setLoading(true);
+    if(!silent){setLoading(true);setLoadError(null);}
     try{
       const r=await fetch(`${scriptUrl}?action=getCommandes&t=${Date.now()}`);
-      const d=await r.json();
+      const text=await r.text();
+      let d;
+      try{ d=JSON.parse(text); }catch(e){ setLoadError("Réponse invalide: "+text.slice(0,100)); return; }
+      if(d.error){ setLoadError("Erreur Apps Script: "+d.error); return; }
       if(d.commandes)setCmd(d.commandes);
-    }catch(e){}
+      else setLoadError("Pas de commandes dans la réponse");
+    }catch(e){ setLoadError("Erreur réseau: "+e.message); }
     if(!silent)setLoading(false);
   },[scriptUrl]);
 
@@ -1205,6 +1210,9 @@ export default function App(){
           </div>
           {!scriptUrl&&<div style={{textAlign:"center",padding:12,color:"#FF9F0A",fontSize:12}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
           {scriptUrl&&commandes.length===0&&!loading&&<div style={{textAlign:"center",padding:12,color:"#4A5568",fontSize:12}}>Aucune commande — appuie sur ↻ pour charger</div>}
+          {loadError&&<div style={{background:"rgba(255,69,58,.08)",border:"1px solid rgba(255,69,58,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8,fontSize:11,color:"#FF453A"}}>
+            ⚠ {loadError}
+          </div>}
           {commandes.length>0&&<>
             {cmdBrouillon.length>0&&<>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#9B59F7",margin:"20px 0 8px",paddingBottom:5,borderBottom:"1px solid rgba(155,89,247,.15)"}}>✏️ À finaliser ({cmdBrouillon.length})</div>
