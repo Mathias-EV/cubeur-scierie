@@ -73,7 +73,25 @@ function nbUnitesM3Direct(l){
   if(!ep||!la||!lo||!totalM3||totalM3<=0) return null;
   const volUnit=round(ep*la*lo,6);
   if(volUnit<=0) return null;
-  return Math.ceil(totalM3/volUnit); // arrondi au supérieur
+  return Math.ceil(totalM3/volUnit);
+}
+
+// Nb d'unités pour m² : ceil(total_m² / (la×lo))
+function nbUnitesM2(l){
+  const la=pf(l.largeur)/1000, lo=pf(l.longueur);
+  const totalM2=pf(l.quantite);
+  if(!la||!lo||!totalM2||totalM2<=0) return null;
+  const surfUnit=round(la*lo,6);
+  if(surfUnit<=0) return null;
+  return Math.ceil(totalM2/surfUnit);
+}
+
+// Nb d'unités pour mL : ceil(total_mL / lo)
+function nbUnitesMl(l){
+  const lo=pf(l.longueur);
+  const totalMl=pf(l.quantite);
+  if(!lo||!totalMl||totalMl<=0) return null;
+  return Math.ceil(totalMl/lo);
 }
 
 // Calcul HT selon le type de prix choisi (gère HT et TTC)
@@ -326,15 +344,23 @@ async function genererDevisPDF(form, cmdId){
     if(u==="m³") qTxt=vol!=null?`${vol} m³`:`${nb} u.`;
     else if(u==="m³direct"){
       const nbU=nbUnitesM3Direct(l);
-      qTxt=`${nb} m³`;
-      if(nbU!=null){
-        const volU=round((pf(l.epaisseur)/1000)*(pf(l.largeur)/1000)*pf(l.longueur),6);
-        qTxt=`${nb} m³
-→ ${nbU} pièces`;
-      }
+      // Sur le devis : afficher le volume + nb pièces sur 2 lignes
+      if(nbU!=null) qTxt=`${nb} m³
+${nbU} pcs`;
+      else qTxt=`${nb} m³`;
     }
-    else if(u==="m²") qTxt=`${nb} m²${vol!=null?" ("+vol+" m³)":""}`;
-    else if(u==="mL") qTxt=`${nb} mL${vol!=null?" ("+vol+" m³)":""}`;
+    else if(u==="m²"){
+      const nbU=nbUnitesM2(l);
+      if(nbU!=null) qTxt=`${nb} m²
+${nbU} pcs`;
+      else qTxt=`${nb} m²`;
+    }
+    else if(u==="mL"){
+      const nbU=nbUnitesMl(l);
+      if(nbU!=null) qTxt=`${nb} mL
+${nbU} pcs`;
+      else qTxt=`${nb} mL`;
+    }
     else qTxt=`${nb} u.`;
 
     // Fond alternant
@@ -366,8 +392,7 @@ async function genererDevisPDF(form, cmdId){
     doc.setFont("helvetica","normal");
     doc.text((l.essence||"—").slice(0,14), COL.essence+1, midY);
 
-    // Quantité (centré, avec support 2 lignes si 
-)
+    // Quantité (centré, avec support 2 lignes)
     doc.setFont("helvetica","bold");
     doc.setTextColor(...BRUN);
     doc.setFontSize(7.5);
@@ -1008,6 +1033,18 @@ export default function App(){
                       {u!=="m³"&&vol==null&&<div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
                         ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
                       </div>}
+                      {/* Nb pièces pour m² et mL */}
+                      {(u==="m²"||u==="mL")&&(()=>{
+                        const n=u==="m²"?nbUnitesM2(lg):nbUnitesMl(lg);
+                        if(n==null) return null;
+                        const unitVal=u==="m²"?round((pf(lg.largeur)/1000)*pf(lg.longueur),6):pf(lg.longueur);
+                        const unitLbl=u==="m²"?"m²/pcs":"m/pcs";
+                        return <div style={{marginTop:4,padding:"4px 8px",background:"rgba(10,132,255,.08)",borderRadius:6,border:"1px solid rgba(10,132,255,.2)"}}>
+                          <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Nb de pièces nécessaires </span>
+                          <span style={{fontSize:16,fontWeight:700,color:"#0A84FF"}}>{n} pièces</span>
+                          <span style={{fontSize:11,color:"#8A9BB0",marginLeft:6}}>({unitVal} {unitLbl} × {n})</span>
+                        </div>;
+                      })()}
                     </div>
                     {/* Colonne droite : HT + TTC */}
                     {ht!=null&&(()=>{
