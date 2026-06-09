@@ -137,22 +137,41 @@ function calcul(f){
 
 // ─── GÉNÉRATION DEVIS PDF ─────────────────────────────────────────────────────
 async function genererDevisPDF(form, cmdId){
-  // Charger jsPDF dynamiquement depuis CDN si pas encore disponible
-  if(!window._jsPDF){
-    await new Promise((resolve,reject)=>{
-      if(document.querySelector('script[data-jspdf]')){ resolve(); return; }
-      const s=document.createElement('script');
-      s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-      s.setAttribute('data-jspdf','1');
-      s.onload=()=>{ window._jsPDF=window.jspdf.jsPDF; resolve(); };
-      s.onerror=()=>reject(new Error('jsPDF CDN indisponible'));
-      document.head.appendChild(s);
-    });
-  } else if(!window._jsPDF && window.jspdf){
-    window._jsPDF=window.jspdf.jsPDF;
+  // Charger jsPDF depuis CDN (compatible CRA / React)
+  const loadJsPDF = () => new Promise((resolve, reject) => {
+    // Déjà chargé ?
+    if(window.jspdf && window.jspdf.jsPDF){ resolve(window.jspdf.jsPDF); return; }
+    // Script déjà dans le DOM mais pas encore prêt ?
+    const existing = document.querySelector('script[data-jspdf]');
+    if(existing){
+      // Attendre qu'il soit prêt
+      const wait = setInterval(()=>{
+        if(window.jspdf && window.jspdf.jsPDF){
+          clearInterval(wait); resolve(window.jspdf.jsPDF);
+        }
+      }, 50);
+      setTimeout(()=>{ clearInterval(wait); reject(new Error('Timeout jsPDF')); }, 5000);
+      return;
+    }
+    // Injecter le script
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.setAttribute('data-jspdf','1');
+    s.onload = () => {
+      if(window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF);
+      else reject(new Error('jsPDF non défini après chargement'));
+    };
+    s.onerror = () => reject(new Error('Erreur de chargement jsPDF'));
+    document.head.appendChild(s);
+  });
+
+  let JsPDF;
+  try {
+    JsPDF = await loadJsPDF();
+  } catch(e) {
+    alert("Impossible de charger le générateur PDF.\nVérifiez votre connexion et réessayez.\n\nErreur : " + e.message);
+    return;
   }
-  const JsPDF = window._jsPDF || (window.jspdf&&window.jspdf.jsPDF);
-  if(!JsPDF){ alert("Impossible de charger le générateur PDF. Vérifiez votre connexion internet."); return; }
   const doc = new JsPDF({ unit:"mm", format:"a4" });
   const TVA=0.20;
 
