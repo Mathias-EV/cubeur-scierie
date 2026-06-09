@@ -11,7 +11,7 @@ const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
 const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
-const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"" };
+const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³" };
 const initCmd   = { client:"",dateLivraison:"",notes:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
@@ -24,26 +24,64 @@ const today=()=>new Date().toISOString().split("T")[0];
 const fmtDate=()=>new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
 const prodId=(cmdId,idx)=>`${cmdId}-P${idx+1}`;
 
-// Volume unitaire affiché en temps réel dans le formulaire commande
+// ── Calcul pour le formulaire commande ──
+// Pour m³ : volume = ep×la×lo×nb
+// Pour m²  : quantite = total m² commandé → volume m³ = m²×ep (si ep dispo)
+//            sinon on affiche juste les m² commandés
+// Pour mL  : quantite = total mL commandé → volume m³ = mL×ep×la (si ep+la dispo)
 function volLigneM3(l){
   const u=l.unite||"m³";
-  const ep=parseFloat(l.epaisseur)/1000, la=parseFloat(l.largeur)/1000, lo=parseFloat(l.longueur);
-  const nb=parseFloat(l.quantite);
+  const ep=parseFloat(l.epaisseur)/1000;
+  const la=parseFloat(l.largeur)/1000;
+  const lo=parseFloat(l.longueur);
+  const nb=parseFloat(l.quantite); // nb = nb unités (m³) ou total m²/mL
+  if(!nb||nb<=0) return null;
   if(u==="m³"){
-    if(ep>0&&la>0&&lo>0&&nb>0) return round(ep*la*lo*nb,4);
+    if(ep>0&&la>0&&lo>0) return round(ep*la*lo*nb,4);
+    return null;
   } else if(u==="m²"){
-    if(la>0&&lo>0&&nb>0) return round(la*lo*nb,4);
+    // quantite = total m² commandé
+    // volume m³ = total_m² × épaisseur (si ep dispo)
+    if(ep>0) return round(nb*ep,4);
+    return null; // pas de m³ sans épaisseur
   } else {
-    if(lo>0&&nb>0) return round(lo*nb,4);
+    // mL : quantite = total mL commandé
+    // volume m³ = total_mL × ep × la (si ep+la dispo)
+    if(ep>0&&la>0) return round(nb*ep*la,4);
+    return null;
   }
-  return null;
 }
 
-// Calcul HT d'une ligne pour le devis
+// Surface/linéaire commandé (pour l'affichage et le devis)
+function qteCommandee(l){
+  const nb=parseFloat(l.quantite);
+  if(!nb||nb<=0) return null;
+  return nb;
+}
+
+// Calcul HT selon le type de prix choisi
 function ligneHT(l){
-  const v=volLigneM3(l), p=parseFloat(l.prixUnitaire);
-  if(v==null||!p) return null;
-  return round(v*p,2);
+  const p=parseFloat(l.prixUnitaire);
+  if(!p||p<=0) return null;
+  const tp=l.typePrix||l.unite||"m³";
+  const nb=parseFloat(l.quantite);
+  if(!nb||nb<=0) return null;
+
+  if(tp==="m³"){
+    // Prix au m³ : HT = volume_m³ × prix
+    const v=volLigneM3(l);
+    if(v==null) return null;
+    return round(v*p,2);
+  } else if(tp==="m²"){
+    // Prix au m² : HT = total_m² × prix
+    return round(nb*p,2);
+  } else if(tp==="mL"){
+    // Prix au mL : HT = total_mL × prix
+    return round(nb*p,2);
+  } else {
+    // Prix à l'unité : HT = nb × prix
+    return round(nb*p,2);
+  }
 }
 
 // ─── CALCUL selon unité ───────────────────────────────────────────────────────
@@ -196,14 +234,24 @@ function genererDevisPDF(form, cmdId){
       dimTxt=`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m`;
     else if(l.longueur) dimTxt=`${l.longueur}m`;
     doc.text(dimTxt,126,y+6);
-    // Quantité avec volume
-    const qLabel = vol!=null ? `${vol} ${u}` : (l.quantite||"—");
+    // Quantité : afficher le total commandé + volume m³ si différent
+    const nb=parseFloat(l.quantite)||0;
+    let qLabel="";
+    if(u==="m³") qLabel = vol!=null ? `${vol} m³` : `${nb} unités`;
+    else if(u==="m²") qLabel = `${nb} m²${vol!=null?" → "+vol+" m³":""}`;
+    else qLabel = `${nb} mL${vol!=null?" → "+vol+" m³":""}`;
+
     doc.setFont("helvetica","bold");
     doc.setTextColor(...BRUN);
-    doc.text(qLabel,160,y+6,{align:"center"});
+    doc.setFontSize(7.5);
+    doc.text(qLabel,160,y+6,{align:"center",maxWidth:34});
+    doc.setFontSize(8.5);
     doc.setFont("helvetica","normal");
     doc.setTextColor(...NOIR);
-    if(l.prixUnitaire) doc.text(`${parseFloat(l.prixUnitaire).toFixed(2)} €`,175,y+6,{align:"right"});
+    const tp=l.typePrix||u;
+    if(l.prixUnitaire){
+      doc.text(`${parseFloat(l.prixUnitaire).toFixed(2)} €/${tp}`,175,y+6,{align:"right"});
+    }
     if(ht!=null){
       totalHT+=ht;
       doc.text(`${ht.toFixed(2)} €`,196,y+6,{align:"right"});
@@ -277,7 +325,16 @@ function genererDevisPDF(form, cmdId){
   doc.setTextColor(196,164,122);
   doc.text("EXPLOITATION VERDON · Entrepreneur individuel · SIREN 881 432 348 · N° TVA FR38881432348",105,293,{align:"center"});
 
-  doc.save(`Devis_${cmdId}_${form.client||"client"}.pdf`);
+  // Ouvrir dans un nouvel onglet (fonctionne sur mobile et Vercel)
+  const pdfBlob = doc.output('blob');
+  const blobUrl = URL.createObjectURL(pdfBlob);
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = `Devis_${cmdId}_${(form.client||"client").replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
+  link.target = '_blank';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(()=>{ document.body.removeChild(link); URL.revokeObjectURL(blobUrl); }, 1000);
 }
 
 async function callScript(url, body){
@@ -395,7 +452,7 @@ export default function App(){
   // ─────────────────────────────────────────────────────────────────────────────
   const sf=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
   const sl=(i,f)=>e=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],[f]:e.target.value};return{...p,lignes:ls};});
-  const slv=(i,v)=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v};return{...p,lignes:ls};});
+  const slv=(i,v)=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:v,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
   const formValid=form.client&&form.dateLivraison&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
@@ -668,29 +725,68 @@ export default function App(){
                   <Field label="Long. m (opt.)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
                 </Row3>
               )}
-              <Row2 style={{marginTop:10}}>
-                <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Total commandé (m²)":"Total commandé (mL)"}>
-                  <Num value={lg.quantite} onChange={sl(i,"quantite")} ph={(lg.unite||"m³")==="m³"?"100":"ex: 15"}/>
-                </Field>
-                <Field label="Prix u. HT (€/unité)">
-                  <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph="550"/>
-                </Field>
-              </Row2>
-              {/* Volume calculé en temps réel */}
+              {/* Quantité / Total commandé */}
+              <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Total commandé (m²)":`Total commandé (mL)`} style={{marginTop:10}}>
+                <Num value={lg.quantite} onChange={sl(i,"quantite")} ph={(lg.unite||"m³")==="m³"?"100":(lg.unite==="m²")?"ex: 15 m²":"ex: 50 mL"}/>
+              </Field>
+
+              {/* Prix : sélecteur de base de tarification + saisie */}
+              <div style={{marginTop:10,background:"rgba(255,255,255,.03)",borderRadius:9,padding:"10px 12px",border:"1px solid rgba(255,255,255,.07)"}}>
+                <div style={{fontSize:11,color:"#8A9BB0",fontWeight:500,marginBottom:8}}>Prix unitaire HT</div>
+                {/* Boutons type prix */}
+                <div style={{display:"flex",gap:5,marginBottom:8}}>
+                  {(()=>{
+                    const u=lg.unite||"m³";
+                    const opts=u==="m³"?["m³","unité"]:u==="m²"?["m²","m³","unité"]:["mL","m³","unité"];
+                    return opts.map(tp=>(
+                      <button key={tp} type="button"
+                        onClick={()=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],typePrix:tp};return{...p,lignes:ls};})}
+                        style={{flex:1,padding:"6px 4px",fontSize:12,fontWeight:600,fontFamily:"inherit",
+                          borderRadius:6,cursor:"pointer",
+                          background:(lg.typePrix||u)===tp?"#2D6A4F":"rgba(255,255,255,.04)",
+                          color:(lg.typePrix||u)===tp?"#FFFFFF":"#8A9BB0",
+                          border:(lg.typePrix||u)===tp?"1px solid #2D6A4F":"1px solid rgba(255,255,255,.08)"}}>
+                        €/{tp}
+                      </button>
+                    ));
+                  })()}
+                </div>
+                <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph={`Ex: 550 €/${lg.typePrix||lg.unite||"m³"}`}/>
+              </div>
+
+              {/* Résultat : m³ + montant en temps réel */}
               {(()=>{
+                const u=lg.unite||"m³";
                 const vol=volLigneM3(lg);
                 const ht=ligneHT(lg);
-                const u=lg.unite||"m³";
-                if(vol==null) return null;
-                return <div style={{background:"rgba(52,199,89,.07)",border:"1px solid rgba(52,199,89,.18)",borderRadius:8,padding:"8px 12px",marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.06em"}}>Volume calculé </span>
-                    <span style={{fontSize:16,fontWeight:700,color:"#34C759",marginLeft:4}}>{vol} {u}</span>
+                const nb=parseFloat(lg.quantite);
+                const hasQte=nb>0;
+                if(!hasQte) return null;
+                return <div style={{background:"rgba(52,199,89,.06)",border:"1px solid rgba(52,199,89,.15)",borderRadius:8,padding:"10px 12px",marginTop:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                    {/* Colonne gauche : quantité + volume */}
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {u!=="m³"&&<div>
+                        <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Commandé </span>
+                        <span style={{fontSize:15,fontWeight:700,color:"#0A84FF"}}>{nb} {u}</span>
+                      </div>}
+                      {vol!=null&&<div>
+                        <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>
+                          {u==="m³"?"Volume charge":"Volume m³ équiv."}
+                        </span>
+                        <span style={{fontSize:u==="m³"?16:14,fontWeight:700,color:"#34C759",marginLeft:4}}>{vol} m³</span>
+                      </div>}
+                      {u!=="m³"&&vol==null&&<div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
+                        ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
+                      </div>}
+                    </div>
+                    {/* Colonne droite : montant */}
+                    {ht!=null&&<div style={{textAlign:"right"}}>
+                      <div style={{fontSize:10,color:"#8A9BB0"}}>Total HT</div>
+                      <div style={{fontSize:16,fontWeight:700,color:"#FF9F0A"}}>{ht.toFixed(2)} €</div>
+                      <div style={{fontSize:10,color:"#8A9BB0"}}>TTC : {(ht*1.2).toFixed(2)} €</div>
+                    </div>}
                   </div>
-                  {ht!=null&&<div style={{textAlign:"right"}}>
-                    <div style={{fontSize:10,color:"#8A9BB0"}}>Total HT</div>
-                    <div style={{fontSize:15,fontWeight:700,color:"#FF9F0A"}}>{ht.toFixed(2)} €</div>
-                  </div>}
                 </div>;
               })()}
               {form.lignes.length>1&&<button style={{...S.btnDel,marginTop:10,width:"100%",textAlign:"center"}} onClick={()=>delL(i)}>🗑 Supprimer ce produit</button>}
