@@ -66,6 +66,16 @@ function qteCommandee(l){
   return nb;
 }
 
+// Nb d'unités pour m³direct : ceil(total_m³ / vol_unitaire)
+function nbUnitesM3Direct(l){
+  const ep=pf(l.epaisseur)/1000, la=pf(l.largeur)/1000, lo=pf(l.longueur);
+  const totalM3=pf(l.quantite);
+  if(!ep||!la||!lo||!totalM3||totalM3<=0) return null;
+  const volUnit=round(ep*la*lo,6);
+  if(volUnit<=0) return null;
+  return Math.ceil(totalM3/volUnit); // arrondi au supérieur
+}
+
 // Calcul HT selon le type de prix choisi (gère HT et TTC)
 function ligneHT(l){
   let p=pf(l.prixUnitaire);
@@ -314,7 +324,15 @@ async function genererDevisPDF(form, cmdId){
     // ── Quantité ──
     let qTxt="";
     if(u==="m³") qTxt=vol!=null?`${vol} m³`:`${nb} u.`;
-    else if(u==="m³direct") qTxt=`${nb} m³`;
+    else if(u==="m³direct"){
+      const nbU=nbUnitesM3Direct(l);
+      qTxt=`${nb} m³`;
+      if(nbU!=null){
+        const volU=round((pf(l.epaisseur)/1000)*(pf(l.largeur)/1000)*pf(l.longueur),6);
+        qTxt=`${nb} m³
+→ ${nbU} pièces`;
+      }
+    }
     else if(u==="m²") qTxt=`${nb} m²${vol!=null?" ("+vol+" m³)":""}`;
     else if(u==="mL") qTxt=`${nb} mL${vol!=null?" ("+vol+" m³)":""}`;
     else qTxt=`${nb} u.`;
@@ -348,12 +366,21 @@ async function genererDevisPDF(form, cmdId){
     doc.setFont("helvetica","normal");
     doc.text((l.essence||"—").slice(0,14), COL.essence+1, midY);
 
-    // Quantité (centré)
+    // Quantité (centré, avec support 2 lignes si 
+)
     doc.setFont("helvetica","bold");
     doc.setTextColor(...BRUN);
     doc.setFontSize(7.5);
-    doc.text(qTxt, COL.qte+10, midY, {align:"center", maxWidth:18});
-    doc.setFontSize(8);
+    if(qTxt.includes("\n")){
+      const parts=qTxt.split("\n");
+      doc.text(parts[0], COL.qte+10, twoLines?y+4:midY-1.5, {align:"center", maxWidth:22});
+      doc.setFontSize(6.5); doc.setTextColor(60,100,60);
+      doc.text(parts[1], COL.qte+10, twoLines?y+9:midY+3, {align:"center", maxWidth:22});
+      doc.setFontSize(8); doc.setTextColor(...NOIR);
+    } else {
+      doc.text(qTxt, COL.qte+10, midY, {align:"center", maxWidth:22});
+      doc.setFontSize(8);
+    }
 
     // P.U. HT (centré)
     doc.setFont("helvetica","normal");
@@ -962,9 +989,22 @@ export default function App(){
                           {u==="m³"?"Volume charge":u==="m³direct"?"Volume commandé":"Volume m³ équiv."}
                         </span>
                         <span style={{fontSize:16,fontWeight:700,color:"#34C759",marginLeft:4}}>
-                          {u==="m³direct"?`${parseFloat(lg.quantite)||0} m³`:vol+" m³"}
+                          {u==="m³direct"?`${pf(lg.quantite)||0} m³`:vol+" m³"}
                         </span>
                       </div>}
+                      {/* Nb d'unités calculé pour m³direct */}
+                      {u==="m³direct"&&(()=>{
+                        const n=nbUnitesM3Direct(lg);
+                        if(n==null) return <div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
+                          ⚠ Renseignez les dimensions pour calculer le nombre de pièces
+                        </div>;
+                        const volU=round((pf(lg.epaisseur)/1000)*(pf(lg.largeur)/1000)*pf(lg.longueur),6);
+                        return <div style={{marginTop:4,padding:"4px 8px",background:"rgba(10,132,255,.08)",borderRadius:6,border:"1px solid rgba(10,132,255,.2)"}}>
+                          <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase"}}>Nb de pièces nécessaires </span>
+                          <span style={{fontSize:16,fontWeight:700,color:"#0A84FF"}}>{n} pièces</span>
+                          <span style={{fontSize:11,color:"#8A9BB0",marginLeft:6}}>({volU} m³/u. × {n} = {round(volU*n,4)} m³)</span>
+                        </div>;
+                      })()}
                       {u!=="m³"&&vol==null&&<div style={{fontSize:11,color:"#FF9F0A",marginTop:2}}>
                         ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
                       </div>}
