@@ -1199,8 +1199,13 @@ export default function App(){
             🗑 Effacer le formulaire
           </button>
 
-          {commandes.length>0&&<>
+          <div style={{margin:"20px 0 10px",display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0"}}>Commandes</div>
             <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
+          </div>
+          {!scriptUrl&&<div style={{textAlign:"center",padding:12,color:"#FF9F0A",fontSize:12}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {scriptUrl&&commandes.length===0&&!loading&&<div style={{textAlign:"center",padding:12,color:"#4A5568",fontSize:12}}>Aucune commande — appuie sur ↻ pour charger</div>}
+          {commandes.length>0&&<>
             {cmdBrouillon.length>0&&<>
               <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#9B59F7",margin:"20px 0 8px",paddingBottom:5,borderBottom:"1px solid rgba(155,89,247,.15)"}}>✏️ À finaliser ({cmdBrouillon.length})</div>
               {cmdBrouillon.map(c=>(
