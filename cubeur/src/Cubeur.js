@@ -231,20 +231,28 @@ async function genererDevisPDF(form, cmdId){
   if(form.notes) doc.text(form.notes,122,y+19,{maxWidth:76});
 
   // ── Tableau produits ──
+  // Colonnes : Produit(14-68) Essence(69-95) Qualité(96-118) Dims(119-148) Qté(149-162) PU(163-181) Total(182-196)
+  // Largeurs :     54              26              22             29            13           18           14
   y=78;
+  const COL={
+    produit:14, essence:69, qualite:96,
+    dims:119, qte:149, pu:163, total:182, end:196
+  };
+  const ROW_H=10; // hauteur ligne augmentée pour 2 lignes si besoin
+
   // En-tête tableau
   doc.setFillColor(...BRUN);
   doc.rect(14,y,182,8,"F");
   doc.setTextColor(250,243,232);
   doc.setFont("helvetica","bold");
-  doc.setFontSize(8.5);
-  doc.text("Produit",16,y+5.5);
-  doc.text("Essence",70,y+5.5);
-  doc.text("Qualité",100,y+5.5);
-  doc.text("Dimensions",126,y+5.5);
-  doc.text("Qté",160,y+5.5,{align:"center"});
-  doc.text("P.U. HT",175,y+5.5,{align:"right"});
-  doc.text("Total HT",196,y+5.5,{align:"right"});
+  doc.setFontSize(8);
+  doc.text("Produit",     COL.produit+1, y+5.5);
+  doc.text("Essence",     COL.essence+1, y+5.5);
+  doc.text("Qualité",     COL.qualite+1, y+5.5);
+  doc.text("Dimensions",  COL.dims+1,    y+5.5);
+  doc.text("Qté",         COL.qte+6,     y+5.5, {align:"center"});
+  doc.text("P.U. HT",     COL.pu+17,     y+5.5, {align:"right"});
+  doc.text("Total HT",    COL.end,       y+5.5, {align:"right"});
   y+=8;
 
   let totalHT=0;
@@ -252,52 +260,109 @@ async function genererDevisPDF(form, cmdId){
     const ht=ligneHT(l);
     const vol=volLigneM3(l);
     const u=l.unite||"m³";
+    const nb=parseFloat(l.quantite)||0;
+    const tp=l.typePrix||u;
+
+    // Calculer le texte quantité (ligne 1) et volume m³ (ligne 2 si besoin)
+    let qLine1="", qLine2="";
+    if(u==="m³"){
+      qLine1 = vol!=null ? `${vol} m³` : `${nb} u.`;
+    } else if(u==="m²"){
+      qLine1 = `${nb} m²`;
+      if(vol!=null) qLine2 = `→ ${vol} m³`;
+    } else {
+      qLine1 = `${nb} mL`;
+      if(vol!=null) qLine2 = `→ ${vol} m³`;
+    }
+    const twoLines = qLine2 !== "";
+    const rowH = twoLines ? 14 : 9;
+
+    // Fond alternant
     const bg = i%2===0 ? [255,250,244] : [250,243,232];
     doc.setFillColor(...bg);
-    doc.rect(14,y,182,9,"F");
-    doc.setTextColor(...NOIR);
-    doc.setFont("helvetica","normal");
-    doc.setFontSize(8.5);
-    doc.text(l.produit||"—",16,y+6);
-    doc.text(l.essence||"—",70,y+6);
-    doc.text(l.qualite||"—",100,y+6);
-    // Dimensions
-    let dimTxt="";
-    if(u==="m³"&&l.epaisseur&&l.largeur&&l.longueur)
-      dimTxt=`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m`;
-    else if(l.longueur) dimTxt=`${l.longueur}m`;
-    doc.text(dimTxt,126,y+6);
-    // Quantité : afficher le total commandé + volume m³ si différent
-    const nb=parseFloat(l.quantite)||0;
-    let qLabel="";
-    if(u==="m³") qLabel = vol!=null ? `${vol} m³` : `${nb} unités`;
-    else if(u==="m²") qLabel = `${nb} m²${vol!=null?" → "+vol+" m³":""}`;
-    else qLabel = `${nb} mL${vol!=null?" → "+vol+" m³":""}`;
+    doc.rect(14,y,182,rowH,"F");
 
+    const midY = y + (twoLines ? 5 : 6);
+
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...NOIR);
+
+    // Produit (tronqué si trop long)
+    const prodTxt = (l.produit||"—").slice(0,18);
+    doc.text(prodTxt, COL.produit+1, midY);
+
+    // Essence
+    doc.text((l.essence||"—").slice(0,12), COL.essence+1, midY);
+
+    // Qualité
+    doc.text((l.qualite||"—").slice(0,10), COL.qualite+1, midY);
+
+    // Dimensions sur 2 lignes si besoin
+    let dimLine1="", dimLine2="";
+    if(u==="m³"&&l.epaisseur&&l.largeur&&l.longueur){
+      dimLine1=`${l.epaisseur}×${l.largeur}mm`;
+      dimLine2=`${l.longueur}m`;
+    } else if(l.longueur){
+      dimLine1=`${l.longueur}m`;
+    }
+    if(dimLine2){
+      doc.text(dimLine1, COL.dims+1, y+4.5);
+      doc.setFontSize(7);
+      doc.text(dimLine2, COL.dims+1, y+9);
+      doc.setFontSize(8);
+    } else {
+      doc.text(dimLine1, COL.dims+1, midY);
+    }
+
+    // Quantité (centré dans sa colonne, 2 lignes si m²/mL)
     doc.setFont("helvetica","bold");
     doc.setTextColor(...BRUN);
-    doc.setFontSize(7.5);
-    doc.text(qLabel,160,y+6,{align:"center",maxWidth:34});
-    doc.setFontSize(8.5);
+    doc.setFontSize(8);
+    if(twoLines){
+      doc.text(qLine1, COL.qte+6, y+4.5, {align:"center"});
+      doc.setFontSize(7);
+      doc.setTextColor(80,100,60);
+      doc.text(qLine2, COL.qte+6, y+9.5, {align:"center"});
+      doc.setFontSize(8);
+    } else {
+      doc.text(qLine1, COL.qte+6, midY, {align:"center"});
+    }
+
+    // Prix unitaire
     doc.setFont("helvetica","normal");
     doc.setTextColor(...NOIR);
-    const tp=l.typePrix||u;
+    doc.setFontSize(7.5);
     if(l.prixUnitaire){
-      doc.text(`${parseFloat(l.prixUnitaire).toFixed(2)} €/${tp}`,175,y+6,{align:"right"});
+      const puTxt = `${parseFloat(l.prixUnitaire).toFixed(2)}€`;
+      const puUnit = `/${tp}`;
+      doc.text(puTxt, COL.pu+17, twoLines?y+4.5:midY, {align:"right"});
+      doc.setFontSize(6.5);
+      doc.setTextColor(...GRIS);
+      doc.text(puUnit, COL.pu+17, twoLines?y+9:midY+3.5, {align:"right"});
+      doc.setFontSize(7.5);
+      doc.setTextColor(...NOIR);
     }
+
+    // Total HT
+    doc.setFontSize(8);
     if(ht!=null){
       totalHT+=ht;
-      doc.text(`${ht.toFixed(2)} €`,196,y+6,{align:"right"});
-    } else if(!l.prixUnitaire){
+      doc.setFont("helvetica","bold");
+      doc.setTextColor(...BRUN);
+      doc.text(`${ht.toFixed(2)} €`, COL.end, midY, {align:"right"});
+    } else {
+      doc.setFont("helvetica","normal");
       doc.setTextColor(...GRIS);
-      doc.setFontSize(7.5);
-      doc.text("prix non renseigné",196,y+6,{align:"right"});
+      doc.setFontSize(6.5);
+      doc.text("—", COL.end, midY, {align:"right"});
     }
-    // Ligne or de séparation
+
+    // Filet séparateur
     doc.setDrawColor(...OR);
     doc.setLineWidth(0.2);
-    doc.line(14,y+9,196,y+9);
-    y+=9;
+    doc.line(14, y+rowH, 196, y+rowH);
+    y+=rowH;
   });
 
   // ── Récapitulatif TVA ──
