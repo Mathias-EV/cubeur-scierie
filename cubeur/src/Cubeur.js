@@ -1227,7 +1227,7 @@ export default function App(){
                         onClick={()=>{
                           setForm({
                             client:c.client||"",dateLivraison:c.dateLivraison||c.datelivraison||"",
-                            notes:c.notes||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",
+                            notes:c.notes||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",remise:c.remise||"",
                             lignes:(c.lignes||[]).map(l=>({
                               produit:l.produit||"",essence:l.essence||"",qualite:l.qualite||"",
                               epaisseur:l.epaisseur||"",largeur:l.largeur||"",longueur:l.longueur||"",
@@ -1274,7 +1274,7 @@ export default function App(){
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6,marginBottom:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500,fontSize:13}}>{(d=>d?new Date(d).toLocaleDateString('fr-FR'):"—")(c.dateLivraison||c.datelivraison)}</strong></div>
                     <div style={{display:"flex",gap:6}}>
                       <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center"}}
-                        onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
+                        onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
                       {["attente","En attente"].includes(c.statut||"attente")&&
                         <button style={{...S.btnSmall,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center",color:"#FF9F0A",borderColor:"rgba(255,159,10,.3)"}}
                           onClick={()=>{
@@ -1740,7 +1740,7 @@ function doPost(e) {
       s.appendRow(["id","client","produit","essence","qualite",
         "epaisseur","largeur","longueur","quantite",
         "dateLivraison","notes","statut","dateCreation","prodId","unite",
-        "prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison"]);
+        "prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise"]);
     var ids=s.getLastRow()>1
       ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];
     if(ids.indexOf(String(d.id))===-1)
