@@ -11,7 +11,7 @@ const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
 const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
-const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³" };
+const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"" };
 const initCmd   = { client:"",dateLivraison:"",notes:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
@@ -23,6 +23,28 @@ const genId=()=>"CMD-"+Date.now().toString(36).toUpperCase().slice(-6);
 const today=()=>new Date().toISOString().split("T")[0];
 const fmtDate=()=>new Date().toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
 const prodId=(cmdId,idx)=>`${cmdId}-P${idx+1}`;
+
+// Volume unitaire affiché en temps réel dans le formulaire commande
+function volLigneM3(l){
+  const u=l.unite||"m³";
+  const ep=parseFloat(l.epaisseur)/1000, la=parseFloat(l.largeur)/1000, lo=parseFloat(l.longueur);
+  const nb=parseFloat(l.quantite);
+  if(u==="m³"){
+    if(ep>0&&la>0&&lo>0&&nb>0) return round(ep*la*lo*nb,4);
+  } else if(u==="m²"){
+    if(la>0&&lo>0&&nb>0) return round(la*lo*nb,4);
+  } else {
+    if(lo>0&&nb>0) return round(lo*nb,4);
+  }
+  return null;
+}
+
+// Calcul HT d'une ligne pour le devis
+function ligneHT(l){
+  const v=volLigneM3(l), p=parseFloat(l.prixUnitaire);
+  if(v==null||!p) return null;
+  return round(v*p,2);
+}
 
 // ─── CALCUL selon unité ───────────────────────────────────────────────────────
 // Toutes les dimensions sont toujours stockées.
@@ -73,6 +95,189 @@ function calcul(f){
   if(!ep||!la||!lo||!nb||!vg||vg===0) return null;
   const vu=round(ep*la*lo,6), vc=round(vu*nb,4), rend=round(vc/vg,4);
   return { volumeUnit:vu, volumeCharge:vc, rendement:rend, perte:round(1-rend,4) };
+}
+
+// ─── GÉNÉRATION DEVIS PDF ─────────────────────────────────────────────────────
+function genererDevisPDF(form, cmdId){
+  // jsPDF est chargé via <script> dans index.html — on utilise window.jspdf
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:"mm", format:"a4" });
+  const TVA=0.20;
+
+  // Couleurs
+  const BRUN=[44,26,10], OR=[196,144,74], GRIS=[100,100,100], NOIR=[20,20,20];
+
+  // ── En-tête ──
+  doc.setFillColor(...BRUN);
+  doc.rect(0,0,210,32,"F");
+
+  doc.setTextColor(250,243,232);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(20);
+  doc.text("EXPLOITATION VERDON",14,13);
+  doc.setFontSize(9);
+  doc.setFont("helvetica","normal");
+  doc.setTextColor(196,164,122);
+  doc.text("236 rue des Tisserands · 73540 La Bathie · France",14,19);
+  doc.text("etf.verdon@gmail.com · 06 01 18 24 43",14,24);
+  doc.text("SIREN 881 432 348 · N° TVA FR38881432348",14,29);
+
+  // Titre DEVIS à droite
+  doc.setTextColor(196,144,74);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(26);
+  doc.text("DEVIS",196,18,{align:"right"});
+
+  // Numéro & date
+  const today=new Date();
+  const dd=String(today.getDate()).padStart(2,"0");
+  const mm=String(today.getMonth()+1).padStart(2,"0");
+  const yyyy=today.getFullYear();
+  const expiry=new Date(today); expiry.setMonth(expiry.getMonth()+1);
+  const de=String(expiry.getDate()).padStart(2,"0");
+  const me=String(expiry.getMonth()+1).padStart(2,"0");
+  const ye=expiry.getFullYear();
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica","normal");
+  doc.setTextColor(196,164,122);
+  doc.text(`N° ${cmdId}`,196,25,{align:"right"});
+  doc.text(`Émis le ${dd}/${mm}/${yyyy}`,196,30,{align:"right"});
+
+  // ── Infos client ──
+  let y=42;
+  doc.setFillColor(245,237,224);
+  doc.roundedRect(120,y-5,80,28,2,2,"F");
+  doc.setTextColor(...BRUN);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(9);
+  doc.text("Client",122,y+1);
+  doc.setFont("helvetica","normal");
+  doc.setTextColor(...NOIR);
+  doc.text(form.client||"—",122,y+7);
+  doc.setTextColor(...GRIS);
+  doc.text(`Livraison souhaitée : ${form.dateLivraison||"—"}`,122,y+13);
+  if(form.notes) doc.text(form.notes,122,y+19,{maxWidth:76});
+
+  // ── Tableau produits ──
+  y=78;
+  // En-tête tableau
+  doc.setFillColor(...BRUN);
+  doc.rect(14,y,182,8,"F");
+  doc.setTextColor(250,243,232);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(8.5);
+  doc.text("Produit",16,y+5.5);
+  doc.text("Essence",70,y+5.5);
+  doc.text("Qualité",100,y+5.5);
+  doc.text("Dimensions",126,y+5.5);
+  doc.text("Qté",160,y+5.5,{align:"center"});
+  doc.text("P.U. HT",175,y+5.5,{align:"right"});
+  doc.text("Total HT",196,y+5.5,{align:"right"});
+  y+=8;
+
+  let totalHT=0;
+  (form.lignes||[]).forEach((l,i)=>{
+    const ht=ligneHT(l);
+    const vol=volLigneM3(l);
+    const u=l.unite||"m³";
+    const bg = i%2===0 ? [255,250,244] : [250,243,232];
+    doc.setFillColor(...bg);
+    doc.rect(14,y,182,9,"F");
+    doc.setTextColor(...NOIR);
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(8.5);
+    doc.text(l.produit||"—",16,y+6);
+    doc.text(l.essence||"—",70,y+6);
+    doc.text(l.qualite||"—",100,y+6);
+    // Dimensions
+    let dimTxt="";
+    if(u==="m³"&&l.epaisseur&&l.largeur&&l.longueur)
+      dimTxt=`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m`;
+    else if(l.longueur) dimTxt=`${l.longueur}m`;
+    doc.text(dimTxt,126,y+6);
+    // Quantité avec volume
+    const qLabel = vol!=null ? `${vol} ${u}` : (l.quantite||"—");
+    doc.setFont("helvetica","bold");
+    doc.setTextColor(...BRUN);
+    doc.text(qLabel,160,y+6,{align:"center"});
+    doc.setFont("helvetica","normal");
+    doc.setTextColor(...NOIR);
+    if(l.prixUnitaire) doc.text(`${parseFloat(l.prixUnitaire).toFixed(2)} €`,175,y+6,{align:"right"});
+    if(ht!=null){
+      totalHT+=ht;
+      doc.text(`${ht.toFixed(2)} €`,196,y+6,{align:"right"});
+    } else if(!l.prixUnitaire){
+      doc.setTextColor(...GRIS);
+      doc.setFontSize(7.5);
+      doc.text("prix non renseigné",196,y+6,{align:"right"});
+    }
+    // Ligne or de séparation
+    doc.setDrawColor(...OR);
+    doc.setLineWidth(0.2);
+    doc.line(14,y+9,196,y+9);
+    y+=9;
+  });
+
+  // ── Récapitulatif TVA ──
+  y+=6;
+  if(totalHT>0){
+    const tva=round(totalHT*TVA,2);
+    const ttc=round(totalHT+tva,2);
+    doc.setFillColor(245,237,224);
+    doc.roundedRect(120,y,76,30,2,2,"F");
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...GRIS);
+    doc.text("Total HT",122,y+8);
+    doc.text("TVA (20%)",122,y+15);
+    doc.setFont("helvetica","bold");
+    doc.setTextColor(...BRUN);
+    doc.text("Total TTC",122,y+24);
+    doc.setFont("helvetica","normal");
+    doc.setTextColor(...NOIR);
+    doc.text(`${totalHT.toFixed(2)} €`,194,y+8,{align:"right"});
+    doc.text(`${tva.toFixed(2)} €`,194,y+15,{align:"right"});
+    doc.setFont("helvetica","bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...OR);
+    doc.text(`${ttc.toFixed(2)} €`,194,y+24,{align:"right"});
+    y+=36;
+  }
+
+  // ── Mentions légales ──
+  y=Math.max(y+10,240);
+  doc.setDrawColor(...OR);
+  doc.setLineWidth(0.5);
+  doc.line(14,y,196,y);
+  y+=5;
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(...GRIS);
+  doc.text("Pénalités de retard : trois fois le taux annuel d'intérêt légal en vigueur calculé depuis la date d'échéance jusqu'à complet paiement.",14,y);
+  doc.text("Indemnité forfaitaire pour frais de recouvrement en cas de retard de paiement : 40 €",14,y+5);
+
+  // ── Signature ──
+  y+=14;
+  doc.setFillColor(245,237,224);
+  doc.roundedRect(120,y,76,28,2,2,"F");
+  doc.setFont("helvetica","italic");
+  doc.setFontSize(8);
+  doc.setTextColor(...GRIS);
+  doc.text("Date et signature précédées de la mention",122,y+7);
+  doc.setFont("helvetica","bold");
+  doc.setTextColor(...BRUN);
+  doc.text("« Bon pour accord »",122,y+13);
+
+  // ── Footer ──
+  doc.setFillColor(...BRUN);
+  doc.rect(0,287,210,10,"F");
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(196,164,122);
+  doc.text("EXPLOITATION VERDON · Entrepreneur individuel · SIREN 881 432 348 · N° TVA FR38881432348",105,293,{align:"center"});
+
+  doc.save(`Devis_${cmdId}_${form.client||"client"}.pdf`);
 }
 
 async function callScript(url, body){
@@ -207,8 +412,9 @@ export default function App(){
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
+      try{ genererDevisPDF({...form,lignes:[...form.lignes]}, id); }catch(pdfErr){ console.warn("PDF:",pdfErr); }
       setForm(initCmd);
-      showToast(`Commande ${id} envoyée ✓`);
+      showToast(`Commande ${id} envoyée — devis téléchargé ✓`);
       setTimeout(()=>load(true),1000);
     }catch(e){showToast("Erreur d'envoi","error");}
     setSub(false);
@@ -462,9 +668,31 @@ export default function App(){
                   <Field label="Long. m (opt.)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
                 </Row3>
               )}
-              <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Total commandé (m²)":"Total commandé (mL)"} style={{marginTop:10}}>
-                <Num value={lg.quantite} onChange={sl(i,"quantite")} ph="100"/>
-              </Field>
+              <Row2 style={{marginTop:10}}>
+                <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Total commandé (m²)":"Total commandé (mL)"}>
+                  <Num value={lg.quantite} onChange={sl(i,"quantite")} ph={(lg.unite||"m³")==="m³"?"100":"ex: 15"}/>
+                </Field>
+                <Field label="Prix u. HT (€/unité)">
+                  <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph="550"/>
+                </Field>
+              </Row2>
+              {/* Volume calculé en temps réel */}
+              {(()=>{
+                const vol=volLigneM3(lg);
+                const ht=ligneHT(lg);
+                const u=lg.unite||"m³";
+                if(vol==null) return null;
+                return <div style={{background:"rgba(52,199,89,.07)",border:"1px solid rgba(52,199,89,.18)",borderRadius:8,padding:"8px 12px",marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <span style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.06em"}}>Volume calculé </span>
+                    <span style={{fontSize:16,fontWeight:700,color:"#34C759",marginLeft:4}}>{vol} {u}</span>
+                  </div>
+                  {ht!=null&&<div style={{textAlign:"right"}}>
+                    <div style={{fontSize:10,color:"#8A9BB0"}}>Total HT</div>
+                    <div style={{fontSize:15,fontWeight:700,color:"#FF9F0A"}}>{ht.toFixed(2)} €</div>
+                  </div>}
+                </div>;
+              })()}
               {form.lignes.length>1&&<button style={{...S.btnDel,marginTop:10,width:"100%",textAlign:"center"}} onClick={()=>delL(i)}>🗑 Supprimer ce produit</button>}
             </Card>
           ))}
@@ -506,6 +734,8 @@ export default function App(){
                       </div>
                     ))}
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500}}>{c.dateLivraison||c.datelivraison}</strong></div>
+                      <button style={{...S.btnExport,fontSize:11,padding:"4px 10px",marginTop:4}}
+                        onClick={()=>genererDevisPDF(c,c.id)}>📄 Devis PDF</button>
                   </>
                 )}
               </Card>
