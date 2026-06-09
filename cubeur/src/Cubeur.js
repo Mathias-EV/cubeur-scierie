@@ -268,11 +268,11 @@ async function genererDevisPDF(form, cmdId){
   // Colonnes : Produit(14-68) Essence(69-95) Qualité(96-118) Dims(119-148) Qté(149-162) PU(163-181) Total(182-196)
   // Largeurs :     54              26              22             29            13           18           14
   y=78;
+  // Colonnes (modèle devis client) :
+  // Désignation(14-80) | Essence(81-110) | Qté(111-130) | P.U.HT(131-155) | TVA%(156-168) | Total HT(169-196)
   const COL={
-    produit:14, essence:69, qualite:96,
-    dims:119, qte:149, pu:163, total:182, end:196
+    desc:14, essence:81, qte:111, pu:131, tva:156, total:169, end:196
   };
-  const ROW_H=10; // hauteur ligne augmentée pour 2 lignes si besoin
 
   // En-tête tableau
   doc.setFillColor(...BRUN);
@@ -280,13 +280,12 @@ async function genererDevisPDF(form, cmdId){
   doc.setTextColor(250,243,232);
   doc.setFont("helvetica","bold");
   doc.setFontSize(8);
-  doc.text("Produit",     COL.produit+1, y+5.5);
-  doc.text("Essence",     COL.essence+1, y+5.5);
-  doc.text("Qualité",     COL.qualite+1, y+5.5);
-  doc.text("Dimensions",  COL.dims+1,    y+5.5);
-  doc.text("Qté",         COL.qte+6,     y+5.5, {align:"center"});
-  doc.text("P.U. HT",     COL.pu+17,     y+5.5, {align:"right"});
-  doc.text("Total HT",    COL.end-1,     y+5.5, {align:"right"});
+  doc.text("Désignation",    COL.desc+1,    y+5.5);
+  doc.text("Essence",        COL.essence+1, y+5.5);
+  doc.text("Quantité",       COL.qte+10,    y+5.5, {align:"center"});
+  doc.text("P.U. HT",        COL.pu+12,     y+5.5, {align:"center"});
+  doc.text("TVA",            COL.tva+6,     y+5.5, {align:"center"});
+  doc.text("Total HT",       COL.end,       y+5.5, {align:"right"});
   y+=8;
 
   let totalHT=0;
@@ -296,20 +295,24 @@ async function genererDevisPDF(form, cmdId){
     const u=l.unite||"m³";
     const nb=parseFloat(l.quantite)||0;
     const tp=l.typePrix||u;
+    const isTTCpdf=(l.typeTaxe||"HT")==="TTC";
+    const htVal=ht!=null?(isTTCpdf?round(ht/1.2,2):ht):null;
 
-    // Calculer le texte quantité (ligne 1) et volume m³ (ligne 2 si besoin)
-    let qLine1="", qLine2="";
-    if(u==="m³"){
-      qLine1 = vol!=null ? `${vol} m³` : `${nb} u.`;
-    } else if(u==="m²"){
-      qLine1 = `${nb} m²`;
-      if(vol!=null) qLine2 = `→ ${vol} m³`;
-    } else {
-      qLine1 = `${nb} mL`;
-      if(vol!=null) qLine2 = `→ ${vol} m³`;
-    }
-    const twoLines = qLine2 !== "";
-    const rowH = twoLines ? 14 : 9;
+    // ── Désignation = produit + dims sur 2 lignes ──
+    const prodTxt=(l.produit||"—").slice(0,20);
+    let dimTxt="";
+    if(l.epaisseur&&l.largeur&&l.longueur) dimTxt=`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m`;
+    else if(l.epaisseur&&l.largeur) dimTxt=`${l.epaisseur}×${l.largeur}mm`;
+    else if(l.longueur) dimTxt=`${l.longueur}m`;
+    const twoLines = dimTxt!=="";
+    const rowH = twoLines ? 13 : 9;
+
+    // ── Quantité ──
+    let qTxt="";
+    if(u==="m³"||u==="m³direct") qTxt=vol!=null?`${vol} m³`:`${nb} m³`;
+    else if(u==="m²") qTxt=`${nb} m²${vol!=null?" ("+vol+" m³)":""}`;
+    else if(u==="mL") qTxt=`${nb} mL${vol!=null?" ("+vol+" m³)":""}`;
+    else qTxt=`${nb} u.`;
 
     // Fond alternant
     const bg = i%2===0 ? [255,250,244] : [250,243,232];
@@ -322,75 +325,71 @@ async function genererDevisPDF(form, cmdId){
     doc.setFontSize(8);
     doc.setTextColor(...NOIR);
 
-    // Produit (tronqué si trop long)
-    const prodTxt = (l.produit||"—").slice(0,18);
-    doc.text(prodTxt, COL.produit+1, midY);
-
-    // Essence
-    doc.text((l.essence||"—").slice(0,12), COL.essence+1, midY);
-
-    // Qualité
-    doc.text((l.qualite||"—").slice(0,10), COL.qualite+1, midY);
-
-    // Dimensions sur 2 lignes si besoin
-    let dimLine1="", dimLine2="";
-    if(u==="m³"&&l.epaisseur&&l.largeur&&l.longueur){
-      dimLine1=`${l.epaisseur}×${l.largeur}mm`;
-      dimLine2=`${l.longueur}m`;
-    } else if(l.longueur){
-      dimLine1=`${l.longueur}m`;
-    }
-    if(dimLine2){
-      doc.text(dimLine1, COL.dims+1, y+4.5);
-      doc.setFontSize(7);
-      doc.text(dimLine2, COL.dims+1, y+9);
-      doc.setFontSize(8);
-    } else {
-      doc.text(dimLine1, COL.dims+1, midY);
-    }
-
-    // Quantité (centré dans sa colonne, 2 lignes si m²/mL)
+    // Désignation ligne 1 : produit
     doc.setFont("helvetica","bold");
-    doc.setTextColor(...BRUN);
-    doc.setFontSize(8);
-    if(twoLines){
-      doc.text(qLine1, COL.qte+6, y+4.5, {align:"center"});
-      doc.setFontSize(7);
-      doc.setTextColor(80,100,60);
-      doc.text(qLine2, COL.qte+6, y+9.5, {align:"center"});
-      doc.setFontSize(8);
-    } else {
-      doc.text(qLine1, COL.qte+6, midY, {align:"center"});
-    }
+    doc.text(prodTxt, COL.desc+1, twoLines?y+4.5:midY);
 
-    // Prix unitaire
-    doc.setFont("helvetica","normal");
-    doc.setTextColor(...NOIR);
-    doc.setFontSize(7.5);
-    if(l.prixUnitaire){
-      const isTTCpdf=(l.typeTaxe||"HT")==="TTC";
-      const puTxt=`${parseFloat(l.prixUnitaire).toFixed(2)}€`;
-      doc.text(puTxt, COL.pu+17, twoLines?y+4.5:midY, {align:"right"});
-      doc.setFontSize(6);
+    // Désignation ligne 2 : dimensions
+    if(twoLines){
+      doc.setFont("helvetica","normal");
+      doc.setFontSize(7);
       doc.setTextColor(...GRIS);
-      doc.text(`/${tp} ${isTTCpdf?"TTC":"HT"}`, COL.pu+17, twoLines?y+9:midY+3.5, {align:"right"});
-      doc.setFontSize(7.5);
+      doc.text(dimTxt, COL.desc+1, y+9.5);
+      doc.setFontSize(8);
       doc.setTextColor(...NOIR);
     }
 
-    // Total HT
+    // Essence
+    doc.setFont("helvetica","normal");
+    doc.text((l.essence||"—").slice(0,14), COL.essence+1, midY);
+
+    // Quantité (centré)
+    doc.setFont("helvetica","bold");
+    doc.setTextColor(...BRUN);
+    doc.setFontSize(7.5);
+    doc.text(qTxt, COL.qte+10, midY, {align:"center", maxWidth:18});
     doc.setFontSize(8);
-    if(ht!=null){
-      totalHT+=ht;
+
+    // P.U. HT (centré)
+    doc.setFont("helvetica","normal");
+    doc.setTextColor(...NOIR);
+    if(l.prixUnitaire){
+      const puNum=parseFloat(l.prixUnitaire);
+      const puHT=isTTCpdf?round(puNum/1.2,2):puNum;
+      doc.text(`${puHT.toFixed(2)} €`, COL.pu+12, midY, {align:"center"});
+      doc.setFontSize(6.5);
+      doc.setTextColor(...GRIS);
+      doc.text(`/${tp}`, COL.pu+12, midY+3.5, {align:"center"});
+      doc.setFontSize(8);
+      doc.setTextColor(...NOIR);
+    } else {
+      doc.setTextColor(...GRIS);
+      doc.setFontSize(7);
+      doc.text("—", COL.pu+12, midY, {align:"center"});
+      doc.setFontSize(8);
+      doc.setTextColor(...NOIR);
+    }
+
+    // TVA%
+    doc.setFont("helvetica","normal");
+    doc.setFontSize(8);
+    doc.text("20 %", COL.tva+6, midY, {align:"center"});
+
+    // Total HT
+    if(htVal!=null){
+      totalHT+=htVal;
       doc.setFont("helvetica","bold");
       doc.setTextColor(...BRUN);
-      doc.text(`${ht.toFixed(2)} €`, COL.end, midY, {align:"right"});
+      doc.text(`${htVal.toFixed(2)} €`, COL.end, midY, {align:"right"});
     } else {
       doc.setFont("helvetica","normal");
       doc.setTextColor(...GRIS);
-      doc.setFontSize(6.5);
+      doc.setFontSize(7);
       doc.text("—", COL.end, midY, {align:"right"});
     }
+    doc.setFont("helvetica","normal");
+    doc.setTextColor(...NOIR);
+    doc.setFontSize(8);
 
     // Filet séparateur
     doc.setDrawColor(...OR);
@@ -847,9 +846,7 @@ export default function App(){
               {/* Unité de mesure */}
               <Field label="Unité de mesure" style={{marginBottom:12}}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:5}}>
-                  {[["m³","m³
-(pièces)"],["m³direct","m³
-(direct)"],["m²","m²"],["mL","mL"],["unité","Unité"]].map(([v,lb])=>(
+                  {[["m³","m³ pièces"],["m³direct","m³ direct"],["m²","m²"],["mL","mL"],["unité","Unité"]].map(([v,lb])=>(
                     <button key={v} type="button" onClick={()=>slv(i,v)}
                       style={{padding:"7px 2px",fontSize:11,fontWeight:600,fontFamily:"inherit",
                         borderRadius:7,cursor:"pointer",lineHeight:1.3,
@@ -868,9 +865,9 @@ export default function App(){
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
-              {/* Dimensions selon unité */}
-              {(lg.unite==="m³direct"||lg.unite==="unité")?null:(
-                (lg.unite||"m³")==="m³"?(
+              {/* Dimensions selon unité — toujours affichées sauf "unité" */}
+              {lg.unite==="unité"?null:(
+                (lg.unite==="m³"||lg.unite==="m³direct")?(
                   <Row3>
                     <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
                     <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
