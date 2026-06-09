@@ -364,7 +364,8 @@ async function genererDevisPDF(form, cmdId){
       doc.text(`${puHT.toFixed(2)} €`, COL.pu+12, midY, {align:"center"});
       doc.setFontSize(6.5);
       doc.setTextColor(...GRIS);
-      doc.text(`/${tp}`, COL.pu+12, midY+3.5, {align:"center"});
+      const tpLbl=tp==="m³direct"?"m³":tp;
+      doc.text(`/${tpLbl}`, COL.pu+12, midY+3.5, {align:"center"});
       doc.setFontSize(8);
       doc.setTextColor(...NOIR);
     } else {
@@ -607,7 +608,12 @@ export default function App(){
       i===0?id:"", form.client, l.produit, l.essence, l.qualite,
       l.epaisseur, l.largeur, l.longueur, l.quantite,
       form.dateLivraison, i===0?form.notes:"", "attente", i===0?dc:"",
-      prodId(id,i), l.unite||"m³"   // col 15 = unité
+      prodId(id,i), l.unite||"m³",          // col 15 = unité
+      l.prixUnitaire||"",                    // col 16 = prix unitaire
+      l.typePrix||l.unite||"m³",             // col 17 = type prix
+      l.typeTaxe||"HT",                      // col 18 = type taxe
+      i===0?form.adresseClient||"":"",       // col 19 = adresse client
+      i===0?form.adresseLivraison||"":""     // col 20 = adresse livraison
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1018,9 +1024,9 @@ export default function App(){
                         <span style={{color:"#8A9BB0",fontFamily:"monospace",fontSize:11}}> — {dimLabel(l)}</span>
                       </div>
                     ))}
-                    <div style={{fontSize:12,color:"#8A9BB0",marginTop:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500}}>{c.dateLivraison||c.datelivraison}</strong></div>
+                    <div style={{fontSize:12,color:"#8A9BB0",marginTop:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500}}>{(d=>d?new Date(d).toLocaleDateString('fr-FR'):"—")(c.dateLivraison||c.datelivraison)}</strong></div>
                       <button style={{...S.btnExport,fontSize:11,padding:"4px 10px",marginTop:4}}
-                        onClick={()=>genererDevisPDF(c,c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis PDF</button>
+                        onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis PDF</button>
                   </>
                 )}
               </Card>
@@ -1401,8 +1407,16 @@ export default function App(){
         qualite:o["qualite"],epaisseur:o["epaisseur"],
         largeur:o["largeur"],longueur:o["longueur"],
         quantite:o["quantite"],prodId:o["prodId"]||"",
-        unite:o["unite"]||"m³"
+        unite:o["unite"]||"m³",
+        prixUnitaire:o["prixUnitaire"]||"",
+        typePrix:o["typePrix"]||o["unite"]||"m³",
+        typeTaxe:o["typeTaxe"]||"HT"
       });
+      // Adresses sur la 1ère ligne du bloc
+      if(String(o["id"]||"").trim()&&map[cid]){
+        if(o["adresseClient"]) map[cid].adresseClient=o["adresseClient"];
+        if(o["adresseLivraison"]) map[cid].adresseLivraison=o["adresseLivraison"];
+      }
     });
     return json({commandes:order.map(function(id){return map[id];})});
   }
@@ -1429,7 +1443,8 @@ function doPost(e) {
     if(s.getLastRow()===0)
       s.appendRow(["id","client","produit","essence","qualite",
         "epaisseur","largeur","longueur","quantite",
-        "dateLivraison","notes","statut","dateCreation","prodId","unite"]);
+        "dateLivraison","notes","statut","dateCreation","prodId","unite",
+        "prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison"]);
     var ids=s.getLastRow()>1
       ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];
     if(ids.indexOf(String(d.id))===-1)
