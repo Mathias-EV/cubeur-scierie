@@ -1301,6 +1301,7 @@ export default function App(){
                               notes:c.notes||"",
                               adresseClient:c.adresseClient||"",
                               adresseLivraison:c.adresseLivraison||"",
+                              remise:c.remise||"",
                               lignes:(c.lignes||[]).map(l=>({
                                 produit:l.produit||"",essence:l.essence||"",qualite:l.qualite||"",
                                 epaisseur:l.epaisseur||"",largeur:l.largeur||"",longueur:l.longueur||"",
