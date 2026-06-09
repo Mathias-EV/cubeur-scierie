@@ -8,10 +8,10 @@ const APPS_SCRIPT_URL_KEY = "cubeur_script_url";
 const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau"];
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
 const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
-const UNITES   = ["m³","m²","mL"];
+const UNITES   = ["m³","m²","mL","unité"];
 
 // unite par défaut = m³
-const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³" };
+const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
 const initCmd   = { client:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
@@ -34,20 +34,25 @@ function volLigneM3(l){
   const ep=parseFloat(l.epaisseur)/1000;
   const la=parseFloat(l.largeur)/1000;
   const lo=parseFloat(l.longueur);
-  const nb=parseFloat(l.quantite); // nb = nb unités (m³) ou total m²/mL
+  const nb=parseFloat(l.quantite);
   if(!nb||nb<=0) return null;
   if(u==="m³"){
+    // Mode classique : volume = ep×la×lo×nb (nb = nb de pièces)
     if(ep>0&&la>0&&lo>0) return round(ep*la*lo*nb,4);
     return null;
+  } else if(u==="m³direct"){
+    // Mode m³ direct : quantite = total m³ commandé
+    return round(nb,4);
   } else if(u==="m²"){
-    // quantite = total m² commandé
-    // volume m³ = total_m² × épaisseur (si ep dispo)
+    // quantite = total m² → volume m³ = m²×ep
     if(ep>0) return round(nb*ep,4);
-    return null; // pas de m³ sans épaisseur
-  } else {
-    // mL : quantite = total mL commandé
-    // volume m³ = total_mL × ep × la (si ep+la dispo)
+    return null;
+  } else if(u==="mL"){
+    // quantite = total mL → volume m³ = mL×ep×la
     if(ep>0&&la>0) return round(nb*ep*la,4);
+    return null;
+  } else {
+    // unité : pas de conversion m³ (on facture à la pièce)
     return null;
   }
 }
@@ -59,27 +64,25 @@ function qteCommandee(l){
   return nb;
 }
 
-// Calcul HT selon le type de prix choisi
+// Calcul HT selon le type de prix choisi (gère HT et TTC)
 function ligneHT(l){
-  const p=parseFloat(l.prixUnitaire);
+  let p=parseFloat(l.prixUnitaire);
   if(!p||p<=0) return null;
+  // Si le prix saisi est TTC, le ramener en HT
+  if((l.typeTaxe||"HT")==="TTC") p=round(p/1.2,4);
   const tp=l.typePrix||l.unite||"m³";
   const nb=parseFloat(l.quantite);
   if(!nb||nb<=0) return null;
 
-  if(tp==="m³"){
-    // Prix au m³ : HT = volume_m³ × prix
+  if(tp==="m³"||tp==="m³direct"){
     const v=volLigneM3(l);
     if(v==null) return null;
     return round(v*p,2);
   } else if(tp==="m²"){
-    // Prix au m² : HT = total_m² × prix
     return round(nb*p,2);
   } else if(tp==="mL"){
-    // Prix au mL : HT = total_mL × prix
     return round(nb*p,2);
   } else {
-    // Prix à l'unité : HT = nb × prix
     return round(nb*p,2);
   }
 }
@@ -190,7 +193,7 @@ async function genererDevisPDF(form, cmdId){
   doc.setFont("helvetica","normal");
   doc.setTextColor(196,164,122);
   doc.text("236 rue des Tisserands · 73540 La Bathie · France",14,19);
-  doc.text("etf.verdon@gmail.com · 06 01 18 24 43",14,24);
+  doc.text("etf.verdon@gmail.com",14,24);
   doc.text("SIREN 881 432 348 · N° TVA FR38881432348",14,29);
 
   // Titre DEVIS à droite
@@ -365,12 +368,12 @@ async function genererDevisPDF(form, cmdId){
     doc.setTextColor(...NOIR);
     doc.setFontSize(7.5);
     if(l.prixUnitaire){
-      const puTxt = `${parseFloat(l.prixUnitaire).toFixed(2)}€`;
-      const puUnit = `/${tp}`;
+      const isTTCpdf=(l.typeTaxe||"HT")==="TTC";
+      const puTxt=`${parseFloat(l.prixUnitaire).toFixed(2)}€`;
       doc.text(puTxt, COL.pu+17, twoLines?y+4.5:midY, {align:"right"});
-      doc.setFontSize(6.5);
+      doc.setFontSize(6);
       doc.setTextColor(...GRIS);
-      doc.text(puUnit, COL.pu+17, twoLines?y+9:midY+3.5, {align:"right"});
+      doc.text(`/${tp} ${isTTCpdf?"TTC":"HT"}`, COL.pu+17, twoLines?y+9:midY+3.5, {align:"right"});
       doc.setFontSize(7.5);
       doc.setTextColor(...NOIR);
     }
@@ -402,24 +405,30 @@ async function genererDevisPDF(form, cmdId){
     const tva=round(totalHT*TVA,2);
     const ttc=round(totalHT+tva,2);
     doc.setFillColor(245,237,224);
-    doc.roundedRect(120,y,76,30,2,2,"F");
+    doc.roundedRect(110,y,84,34,2,2,"F");
+    // Labels colonne gauche
     doc.setFont("helvetica","normal");
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(...GRIS);
-    doc.text("Total HT",122,y+8);
-    doc.text("TVA (20%)",122,y+15);
+    doc.text("Total HT",112,y+8);
+    doc.text("TVA 20%",112,y+15);
     doc.setFont("helvetica","bold");
     doc.setTextColor(...BRUN);
-    doc.text("Total TTC",122,y+24);
+    doc.text("Total TTC",112,y+25);
+    // Valeurs colonne droite
     doc.setFont("helvetica","normal");
+    doc.setFontSize(8.5);
     doc.setTextColor(...NOIR);
-    doc.text(`${totalHT.toFixed(2)} €`,194,y+8,{align:"right"});
-    doc.text(`${tva.toFixed(2)} €`,194,y+15,{align:"right"});
+    doc.text(`${totalHT.toFixed(2)} €`,192,y+8,{align:"right"});
+    doc.text(`${tva.toFixed(2)} €`,192,y+15,{align:"right"});
+    // Ligne séparatrice avant TTC
+    doc.setDrawColor(...OR); doc.setLineWidth(0.3);
+    doc.line(110,y+19,194,y+19);
     doc.setFont("helvetica","bold");
     doc.setFontSize(11);
     doc.setTextColor(...OR);
-    doc.text(`${ttc.toFixed(2)} €`,194,y+24,{align:"right"});
-    y+=36;
+    doc.text(`${ttc.toFixed(2)} €`,192,y+27,{align:"right"});
+    y+=40;
   }
 
   // ── Mentions légales ──
@@ -581,7 +590,7 @@ export default function App(){
   // ─────────────────────────────────────────────────────────────────────────────
   const sf=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
   const sl=(i,f)=>e=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],[f]:e.target.value};return{...p,lignes:ls};});
-  const slv=(i,v)=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:v,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});
+  const slv=(i,v)=>{const tp=v==="m³direct"?"m³":v==="unité"?"unité":v; setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:tp,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});};
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
   const formValid=form.client&&form.dateLivraison&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
@@ -835,9 +844,22 @@ export default function App(){
 
           {form.lignes.map((lg,i)=>(
             <Card key={i} title={`Produit ${form.lignes.length>1?i+1:""}`} accent={i===0?"rgba(212,168,83,.3)":"rgba(212,168,83,.12)"}>
-              {/* Unité en haut bien visible */}
+              {/* Unité de mesure */}
               <Field label="Unité de mesure" style={{marginBottom:12}}>
-                <UniteSel value={lg.unite||"m³"} onChange={v=>slv(i,v)}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:5}}>
+                  {[["m³","m³
+(pièces)"],["m³direct","m³
+(direct)"],["m²","m²"],["mL","mL"],["unité","Unité"]].map(([v,lb])=>(
+                    <button key={v} type="button" onClick={()=>slv(i,v)}
+                      style={{padding:"7px 2px",fontSize:11,fontWeight:600,fontFamily:"inherit",
+                        borderRadius:7,cursor:"pointer",lineHeight:1.3,
+                        background:(lg.unite||"m³")===v?"#2D6A4F":"rgba(255,255,255,.05)",
+                        color:(lg.unite||"m³")===v?"#FFFFFF":"#8A9BB0",
+                        border:(lg.unite||"m³")===v?"1px solid #2D6A4F":"1px solid rgba(255,255,255,.08)"}}>
+                      {lb}
+                    </button>
+                  ))}
+                </div>
               </Field>
               <Row2 style={{marginBottom:10}}>
                 <Field label="Produit"><Sel value={lg.produit} onChange={sl(i,"produit")} opts={PRODUITS}/></Field>
@@ -846,33 +868,40 @@ export default function App(){
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
-              {/* Dimensions : obligatoires en m³, optionnelles en m²/mL */}
-              {(lg.unite||"m³")==="m³"?(
-                <Row3>
-                  <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
-                  <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
-                  <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-                </Row3>
-              ):(
-                <Row3>
-                  <Field label="Ép. mm (opt.)"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
-                  <Field label="Larg. mm (opt.)"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
-                  <Field label="Long. m (opt.)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
-                </Row3>
+              {/* Dimensions selon unité */}
+              {(lg.unite==="m³direct"||lg.unite==="unité")?null:(
+                (lg.unite||"m³")==="m³"?(
+                  <Row3>
+                    <Field label="Ép. mm"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
+                    <Field label="Larg. mm"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                    <Field label="Long. m"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+                  </Row3>
+                ):(
+                  <Row3>
+                    <Field label="Ép. mm (opt.)"><Num value={lg.epaisseur} onChange={sl(i,"epaisseur")} ph="27"/></Field>
+                    <Field label="Larg. mm (opt.)"><Num value={lg.largeur} onChange={sl(i,"largeur")} ph="120"/></Field>
+                    <Field label="Long. m (opt.)"><Num value={lg.longueur} onChange={sl(i,"longueur")} ph="2.4"/></Field>
+                  </Row3>
+                )
               )}
               {/* Quantité / Total commandé */}
-              <Field label={(lg.unite||"m³")==="m³"?"Quantité (unités)":(lg.unite==="m²")?"Total commandé (m²)":`Total commandé (mL)`} style={{marginTop:10}}>
-                <Num value={lg.quantite} onChange={sl(i,"quantite")} ph={(lg.unite||"m³")==="m³"?"100":(lg.unite==="m²")?"ex: 15 m²":"ex: 50 mL"}/>
-              </Field>
+              {(()=>{
+                const u=lg.unite||"m³";
+                const lbl=u==="m³"?"Quantité (nb de pièces)":u==="m³direct"?"Total commandé (m³)":u==="m²"?"Total commandé (m²)":u==="mL"?"Total commandé (mL)":"Quantité (nb d'unités)";
+                const ph=u==="m³"?"100":u==="m³direct"?"ex: 2.5":u==="m²"?"ex: 15":u==="mL"?"ex: 50":"ex: 10";
+                return <Field label={lbl} style={{marginTop:10}}>
+                  <Num value={lg.quantite} onChange={sl(i,"quantite")} ph={ph}/>
+                </Field>;
+              })()}
 
-              {/* Prix : sélecteur de base de tarification + saisie */}
+              {/* Prix : type de tarification + HT/TTC + saisie */}
               <div style={{marginTop:10,background:"rgba(255,255,255,.03)",borderRadius:9,padding:"10px 12px",border:"1px solid rgba(255,255,255,.07)"}}>
-                <div style={{fontSize:11,color:"#8A9BB0",fontWeight:500,marginBottom:8}}>Prix unitaire HT</div>
-                {/* Boutons type prix */}
-                <div style={{display:"flex",gap:5,marginBottom:8}}>
+                {/* Type de prix (base de calcul) */}
+                <div style={{fontSize:11,color:"#8A9BB0",fontWeight:500,marginBottom:6}}>Base de tarification</div>
+                <div style={{display:"flex",gap:5,marginBottom:10}}>
                   {(()=>{
                     const u=lg.unite||"m³";
-                    const opts=u==="m³"?["m³","unité"]:u==="m²"?["m²","m³","unité"]:["mL","m³","unité"];
+                    const opts=u==="m³"?["m³","unité"]:u==="m³direct"?["m³"]:u==="m²"?["m²","m³","unité"]:u==="mL"?["mL","m³","unité"]:["unité"];
                     return opts.map(tp=>(
                       <button key={tp} type="button"
                         onClick={()=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],typePrix:tp};return{...p,lignes:ls};})}
@@ -886,7 +915,22 @@ export default function App(){
                     ));
                   })()}
                 </div>
-                <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph={`Ex: 550 €/${lg.typePrix||lg.unite||"m³"}`}/>
+                {/* HT ou TTC */}
+                <div style={{fontSize:11,color:"#8A9BB0",fontWeight:500,marginBottom:6}}>Type de prix saisi</div>
+                <div style={{display:"flex",gap:5,marginBottom:8}}>
+                  {["HT","TTC"].map(tt=>(
+                    <button key={tt} type="button"
+                      onClick={()=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],typeTaxe:tt};return{...p,lignes:ls};})}
+                      style={{flex:1,padding:"6px 4px",fontSize:12,fontWeight:600,fontFamily:"inherit",
+                        borderRadius:6,cursor:"pointer",
+                        background:(lg.typeTaxe||"HT")===tt?"#0A84FF":"rgba(255,255,255,.04)",
+                        color:(lg.typeTaxe||"HT")===tt?"#FFFFFF":"#8A9BB0",
+                        border:(lg.typeTaxe||"HT")===tt?"1px solid #0A84FF":"1px solid rgba(255,255,255,.08)"}}>
+                      {tt}
+                    </button>
+                  ))}
+                </div>
+                <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph={`Ex: ${(lg.typeTaxe||"HT")==="TTC"?"660":"550"} €/${lg.typePrix||lg.unite||"m³"} (${lg.typeTaxe||"HT"})`}/>
               </div>
 
               {/* Résultat : m³ + montant en temps réel */}
@@ -915,12 +959,18 @@ export default function App(){
                         ⚠ Renseignez {u==="m²"?"l'épaisseur":"l'épaisseur + largeur"} pour le volume m³
                       </div>}
                     </div>
-                    {/* Colonne droite : montant */}
-                    {ht!=null&&<div style={{textAlign:"right"}}>
-                      <div style={{fontSize:10,color:"#8A9BB0"}}>Total HT</div>
-                      <div style={{fontSize:16,fontWeight:700,color:"#FF9F0A"}}>{ht.toFixed(2)} €</div>
-                      <div style={{fontSize:10,color:"#8A9BB0"}}>TTC : {(ht*1.2).toFixed(2)} €</div>
-                    </div>}
+                    {/* Colonne droite : HT + TTC */}
+                    {ht!=null&&(()=>{
+                      const isTTC=(lg.typeTaxe||"HT")==="TTC";
+                      const htVal=isTTC?round(ht/1.2,2):ht;
+                      const ttcVal=isTTC?ht:round(ht*1.2,2);
+                      return <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:"#8A9BB0"}}>HT</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#FF9F0A"}}>{htVal.toFixed(2)} €</div>
+                        <div style={{fontSize:10,color:"#8A9BB0",marginTop:3}}>TTC</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#34C759"}}>{ttcVal.toFixed(2)} €</div>
+                      </div>;
+                    })()}
                   </div>
                 </div>;
               })()}
