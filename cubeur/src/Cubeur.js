@@ -587,6 +587,17 @@ export default function App(){
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
+  // ── Tarifs par essence (stockés localement) ──
+  const [tarifs,setTarifs]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("cubeur_tarifs")||"{}"); }
+    catch(e){ return {}; }
+  });
+  const saveTarif=(essence,prix)=>{
+    const t={...tarifs,[essence]:prix};
+    setTarifs(t);
+    localStorage.setItem("cubeur_tarifs",JSON.stringify(t));
+  };
+
   // ── Commande ──
   const [form,setForm]=useState(()=>{
     try{ const d=JSON.parse(localStorage.getItem("cubeur_draft")||"null"); return d||initCmd; }catch(e){ return initCmd; }
@@ -655,7 +666,18 @@ export default function App(){
   // ONGLET 1 — COMMANDE
   // ─────────────────────────────────────────────────────────────────────────────
   const sf=f=>e=>setForm(p=>({...p,[f]:e.target.value}));
-  const sl=(i,f)=>e=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],[f]:e.target.value};return{...p,lignes:ls};});
+  const sl=(i,f)=>e=>{
+    const val=e.target.value;
+    setForm(p=>{
+      const ls=[...p.lignes];
+      ls[i]={...ls[i],[f]:val};
+      // Auto-remplir le prix si on change l'essence et qu'un tarif existe
+      if(f==="essence"&&tarifs[val]&&(!ls[i].prixUnitaire||ls[i].prixUnitaire==="0")){
+        ls[i]={...ls[i],prixUnitaire:String(tarifs[val])};
+      }
+      return{...p,lignes:ls};
+    });
+  };
   const slv=(i,v)=>{const tp=v==="m³direct"?"m³direct":v; setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:tp,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});};
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
@@ -938,6 +960,31 @@ export default function App(){
             <Field label="Adresse de livraison (optionnel)">
               <Inp value={form.adresseLivraison||""} onChange={sf("adresseLivraison")} ph="Identique ou différente"/>
             </Field>
+          </Card>
+
+          {/* ── Tarifs par essence (pré-remplissage) ── */}
+          <Card title="Tarifs par essence (optionnel)">
+            <div style={{fontSize:12,color:"#8A9BB0",marginBottom:10}}>
+              Ces prix se pré-rempliront automatiquement lors de la saisie d'un produit. Chaque prix reste modifiable individuellement.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {ESSENCES.map(ess=>(
+                <div key={ess} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,alignItems:"center"}}>
+                  <div style={{fontSize:13,fontWeight:500,color:"#E8ECEF"}}>{ess}</div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <Num
+                      value={tarifs[ess]||""}
+                      onChange={e=>saveTarif(ess,e.target.value)}
+                      ph="€/m³"
+                    />
+                    {tarifs[ess]&&<button
+                      type="button"
+                      onClick={()=>saveTarif(ess,"")}
+                      style={{background:"transparent",border:"none",color:"#FF453A",cursor:"pointer",fontSize:14,padding:"0 4px"}}>✕</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
           </Card>
 
           {form.lignes.map((lg,i)=>(
