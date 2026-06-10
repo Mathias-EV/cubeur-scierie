@@ -592,8 +592,11 @@ export default function App(){
     try{ return JSON.parse(localStorage.getItem("cubeur_tarifs")||"{}"); }
     catch(e){ return {}; }
   });
+  const [newTarifEss,setNewTarifEss]=useState("");
   const saveTarif=(essence,prix)=>{
-    const t={...tarifs,[essence]:prix};
+    const t={...tarifs};
+    if(prix===""){ delete t[essence]; }
+    else { t[essence]=prix; }
     setTarifs(t);
     localStorage.setItem("cubeur_tarifs",JSON.stringify(t));
   };
@@ -962,29 +965,56 @@ export default function App(){
             </Field>
           </Card>
 
-          {/* ── Tarifs par essence (pré-remplissage) ── */}
+          {/* ── Tarifs par essence (pré-remplissage dynamique) ── */}
           <Card title="Tarifs par essence (optionnel)">
             <div style={{fontSize:12,color:"#8A9BB0",marginBottom:10}}>
-              Ces prix se pré-rempliront automatiquement lors de la saisie d'un produit. Chaque prix reste modifiable individuellement.
+              Pré-rempli automatiquement dans chaque produit · Prix modifiable individuellement
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {ESSENCES.map(ess=>(
-                <div key={ess} style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,alignItems:"center"}}>
-                  <div style={{fontSize:13,fontWeight:500,color:"#E8ECEF"}}>{ess}</div>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <Num
-                      value={tarifs[ess]||""}
-                      onChange={e=>saveTarif(ess,e.target.value)}
-                      ph="€/m³"
-                    />
-                    {tarifs[ess]&&<button
-                      type="button"
-                      onClick={()=>saveTarif(ess,"")}
-                      style={{background:"transparent",border:"none",color:"#FF453A",cursor:"pointer",fontSize:14,padding:"0 4px"}}>✕</button>}
+            {(()=>{
+              // Construire la liste : les essences déjà configurées + une ligne vide à la fin
+              const configured = ESSENCES.filter(e=>tarifs[e]&&tarifs[e]!=="");
+              const available  = ESSENCES.filter(e=>!tarifs[e]||tarifs[e]==="");
+              const showNew    = available.length>0;
+              return <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {/* Lignes configurées */}
+                {configured.map(ess=>(
+                  <div key={ess} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"center"}}>
+                    <select value={ess}
+                      onChange={ev=>{
+                        const nv=ev.target.value; if(!nv||nv===ess) return;
+                        const t={...tarifs,[nv]:tarifs[ess]}; delete t[ess];
+                        setTarifs(t); localStorage.setItem("cubeur_tarifs",JSON.stringify(t));
+                      }}
+                      style={{...S.input,color:"#E8ECEF",fontSize:13}}>
+                      {[ess,...available].map(e=><option key={e} value={e}>{e}</option>)}
+                    </select>
+                    <Num value={tarifs[ess]||""} onChange={ev=>saveTarif(ess,ev.target.value)} ph="€/m³"/>
+                    <button type="button" onClick={()=>saveTarif(ess,"")}
+                      style={{background:"transparent",border:"none",color:"#FF453A",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+                {/* Ligne nouvelle essence — s'affiche seulement si il reste des essences */}
+                {showNew&&(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"center"}}>
+                    <select value={newTarifEss}
+                      onChange={ev=>setNewTarifEss(ev.target.value)}
+                      style={{...S.input,color:newTarifEss?"#E8ECEF":"#8A9BB0",fontSize:13}}>
+                      <option value="">— Essence —</option>
+                      {available.map(e=><option key={e} value={e}>{e}</option>)}
+                    </select>
+                    <Num value="" ph="€/m³"
+                      onChange={ev=>{
+                        if(!newTarifEss||!ev.target.value) return;
+                        saveTarif(newTarifEss, ev.target.value);
+                        setNewTarifEss("");
+                      }}
+                      disabled={!newTarifEss}
+                    />
+                    <div style={{width:24}}/>
+                  </div>
+                )}
+              </div>;
+            })()}
           </Card>
 
           {form.lignes.map((lg,i)=>(
