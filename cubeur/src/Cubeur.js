@@ -1543,7 +1543,13 @@ export default function App(){
                       style={{...S.input,color:"#E8ECEF",fontSize:13}}>
                       {[ess,...available].map(e=><option key={e} value={e}>{e}</option>)}
                     </select>
-                    <Num value={tarifs[ess]||""} onChange={ev=>saveTarif(ess,ev.target.value)} ph="€/m³"/>
+                    <input
+                      key={ess+"_"+tarifs[ess]}
+                      defaultValue={tarifs[ess]||""}
+                      onBlur={ev=>saveTarif(ess,ev.target.value)}
+                      placeholder="€/m³"
+                      style={{...S.input,width:"100%"}}
+                    />
                     <button type="button" onClick={()=>saveTarif(ess,"")}
                       style={{background:"transparent",border:"none",color:"#FF453A",cursor:"pointer",fontSize:16,padding:"0 4px"}}>✕</button>
                   </div>
@@ -1557,13 +1563,18 @@ export default function App(){
                       <option value="">— Essence —</option>
                       {available.map(e=><option key={e} value={e}>{e}</option>)}
                     </select>
-                    <Num value="" ph="€/m³"
-                      onChange={ev=>{
+                    <input
+                      key={"new_"+newTarifEss}
+                      defaultValue=""
+                      onBlur={ev=>{
                         if(!newTarifEss||!ev.target.value) return;
                         saveTarif(newTarifEss, ev.target.value);
                         setNewTarifEss("");
+                        ev.target.value="";
                       }}
                       disabled={!newTarifEss}
+                      placeholder={newTarifEss?"Ex: 550":"€/m³"}
+                      style={{...S.input,width:"100%",opacity:newTarifEss?1:0.4}}
                     />
                     <div style={{width:24}}/>
                   </div>
