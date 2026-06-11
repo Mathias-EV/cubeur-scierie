@@ -270,7 +270,7 @@ async function imprimerCommande(cmd){
     const u=l.unite||"m³";
     const nb=pf(l.quantite)||0;
     const vol=volLigneM3(l);
-    const rowH=12;
+    const rowH=13;
     const bg=i%2===0?[255,255,255]:[248,250,245];
     doc.setFillColor(...bg);
     doc.rect(14,y,192,rowH,"F");
@@ -287,7 +287,9 @@ async function imprimerCommande(cmd){
     doc.setFont("helvetica","bold"); doc.setTextColor(...BRUN);
     if(l.epaisseur) doc.text(String(l.epaisseur),cols.ep+1,y+4);
     if(l.largeur)   doc.text(String(l.largeur),cols.la+1,y+4);
-    if(l.longueur)  doc.text(String(l.longueur)+"m",cols.lo+1,y+4);
+    // Longueur : afficher seulement si c'est un nombre valide (pas une date)
+    if(l.longueur&&!isNaN(pf(l.longueur))&&pf(l.longueur)>0)
+      doc.text(pf(l.longueur)+"m",cols.lo+1,y+4);
 
     // Quantité + volume
     doc.setFont("helvetica","normal"); doc.setTextColor(...NOIR);
@@ -298,14 +300,16 @@ async function imprimerCommande(cmd){
     else qStr=`${nb} u.`;
     doc.text(qStr.slice(0,14),cols.qte+1,y+4);
 
-    // 2ème ligne : dims détaillées si m²/mL
-    if(u==="m²"||u==="mL"||u==="m³direct"){
+    // 2ème ligne : dims sous le nom du produit (tous modes)
+    {
       doc.setFontSize(7); doc.setTextColor(...GRIS);
       let detail="";
-      if(l.epaisseur&&l.largeur&&l.longueur) detail=`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m`;
-      else if(l.epaisseur&&l.largeur) detail=`${l.epaisseur}×${l.largeur}mm`;
-      if(detail) doc.text(detail,cols.prod+1,y+8.5);
-      doc.setFontSize(9); doc.setTextColor(...NOIR);
+      const loNum=pf(l.longueur);
+      if(l.epaisseur&&l.largeur&&loNum>0) detail=`${l.epaisseur}x${l.largeur}mm · ${loNum}m`;
+      else if(l.epaisseur&&l.largeur) detail=`${l.epaisseur}x${l.largeur}mm`;
+      else if(loNum>0) detail=`${loNum}m`;
+      if(detail) doc.text(detail,cols.prod+1,y+9);
+      doc.setFontSize(8); doc.setTextColor(...NOIR);
     }
 
     // Case à cocher
@@ -564,7 +568,8 @@ async function genererDevisPDF(form, cmdId){
     let desig = "";
     if(l.epaisseur&&l.largeur) desig+=`${l.epaisseur}x${l.largeur}`;
     if(l.essence) desig+=` ${l.essence}`;
-    if(l.longueur){ desig+=` ${l.longueur}m`; }
+    const loNumD=pf(l.longueur);
+    if(loNumD>0){ desig+=` ${loNumD}m`; }
     if(!desig) desig=l.produit||"—";
 
     // Quantité
@@ -910,6 +915,8 @@ async function genererFacturePDF(form, cmdId){
 
     // Désignation : produit + essence
     let desig=(l.produit||"")+(l.essence?" "+l.essence:"");
+    const loNumF=pf(l.longueur);
+    if(loNumF>0) desig+=` ${loNumF}m`;
     if(!desig) desig="—";
 
     // Quantité
