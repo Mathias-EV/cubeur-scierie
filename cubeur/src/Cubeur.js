@@ -173,6 +173,196 @@ function calcul(f){
 }
 
 // ─── GÉNÉRATION DEVIS PDF ─────────────────────────────────────────────────────
+async function imprimerCommande(cmd){
+  const loadJsPDF = () => new Promise((resolve, reject) => {
+    if(window.jspdf && window.jspdf.jsPDF){ resolve(window.jspdf.jsPDF); return; }
+    const existing = document.querySelector('script[data-jspdf]');
+    if(existing){
+      const wait = setInterval(()=>{ if(window.jspdf && window.jspdf.jsPDF){ clearInterval(wait); resolve(window.jspdf.jsPDF); } }, 50);
+      setTimeout(()=>{ clearInterval(wait); reject(new Error('Timeout')); }, 5000); return;
+    }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    s.setAttribute('data-jspdf','1');
+    s.onload = () => { if(window.jspdf && window.jspdf.jsPDF) resolve(window.jspdf.jsPDF); else reject(new Error('Erreur')); };
+    s.onerror = () => reject(new Error('Erreur chargement'));
+    document.head.appendChild(s);
+  });
+  let JsPDF;
+  try { JsPDF = await loadJsPDF(); } catch(e) { alert("PDF indisponible : "+e.message); return; }
+  const doc = new JsPDF({ unit:"mm", format:"a4" });
+
+  const NOIR=[30,30,30], GRIS=[100,100,100], GRIS_L=[200,200,200];
+  const VERT=[45,106,79], VERT_L=[240,255,245];
+  const BRUN=[44,26,10], OR=[196,144,74];
+
+  const fmtDateDoc=(d)=>{if(!d)return"—";try{return new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"});}catch(e){return d;}};
+  const today=new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+
+  // ── EN-TÊTE ──
+  doc.setFillColor(...BRUN);
+  doc.rect(0,0,210,22,"F");
+  doc.setTextColor(250,243,232);
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(14);
+  doc.text("EXPLOITATION VERDON",14,10);
+  doc.setFontSize(8);
+  doc.setFont("helvetica","normal");
+  doc.setTextColor(196,164,122);
+  doc.text("Bon de sciage — à remettre au scieur",14,16);
+  doc.setTextColor(220,200,160);
+  doc.text(`Imprimé le ${today}`,196,16,{align:"right"});
+
+  // ── INFOS COMMANDE ──
+  let y=30;
+  doc.setFillColor(...VERT_L);
+  doc.roundedRect(14,y,182,22,2,2,"F");
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...BRUN);
+  doc.text(`Commande : ${cmd.id}`,18,y+8);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...NOIR);
+  doc.text(`Client : ${cmd.client||"—"}`,18,y+15);
+  if(cmd.dateLivraison){
+    doc.setFont("helvetica","bold");
+    doc.setTextColor(...VERT);
+    doc.text(`Livraison souhaitée : ${fmtDateDoc(cmd.dateLivraison)}`,115,y+15);
+  }
+  if(cmd.notes){
+    doc.setFont("helvetica","italic");
+    doc.setFontSize(8);
+    doc.setTextColor(...GRIS);
+    doc.text(`Note : ${cmd.notes}`,18,y+20);
+  }
+  y+=28;
+
+  // ── TABLEAU PRODUITS ──
+  // Colonnes : N° | Produit | Essence | Qualité | Ép.mm | Larg.mm | Long.m | Quantité/Volume | ✓
+  const cols={n:14,prod:22,ess:60,qual:90,ep:115,la:130,lo:145,qte:163,check:192,end:206};
+
+  // En-tête
+  doc.setFillColor(...BRUN);
+  doc.rect(14,y,192,8,"F");
+  doc.setFont("helvetica","bold");
+  doc.setFontSize(8);
+  doc.setTextColor(250,243,232);
+  doc.text("N°",cols.n+1,y+5.5);
+  doc.text("Produit",cols.prod+1,y+5.5);
+  doc.text("Essence",cols.ess+1,y+5.5);
+  doc.text("Qualité",cols.qual+1,y+5.5);
+  doc.text("Ép.",cols.ep+1,y+5.5);
+  doc.text("Larg.",cols.la+1,y+5.5);
+  doc.text("Long.",cols.lo+1,y+5.5);
+  doc.text("Qté / Vol.",cols.qte+1,y+5.5);
+  doc.text("✓",cols.check+6,y+5.5,{align:"center"});
+  y+=8;
+
+  (cmd.lignes||[]).forEach((l,i)=>{
+    const u=l.unite||"m³";
+    const nb=pf(l.quantite)||0;
+    const vol=volLigneM3(l);
+    const rowH=12;
+    const bg=i%2===0?[255,255,255]:[248,250,245];
+    doc.setFillColor(...bg);
+    doc.rect(14,y,192,rowH,"F");
+
+    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...BRUN);
+    doc.text(String(i+1),cols.n+2,y+4);
+
+    doc.setFont("helvetica","normal"); doc.setTextColor(...NOIR);
+    doc.text((l.produit||"—").slice(0,14),cols.prod+1,y+4);
+    doc.text((l.essence||"—").slice(0,12),cols.ess+1,y+4);
+    doc.text((l.qualite||"—").slice(0,12),cols.qual+1,y+4);
+
+    // Dimensions
+    doc.setFont("helvetica","bold"); doc.setTextColor(...BRUN);
+    if(l.epaisseur) doc.text(String(l.epaisseur),cols.ep+1,y+4);
+    if(l.largeur)   doc.text(String(l.largeur),cols.la+1,y+4);
+    if(l.longueur)  doc.text(String(l.longueur)+"m",cols.lo+1,y+4);
+
+    // Quantité + volume
+    doc.setFont("helvetica","normal"); doc.setTextColor(...NOIR);
+    let qStr="";
+    if(u==="m³"||u==="m³direct") qStr=vol!=null?`${vol} m³`:`${nb} u.`;
+    else if(u==="m²") qStr=`${nb} m²${vol!=null?" ("+vol+"m³)":""}`;
+    else if(u==="mL") qStr=`${nb} mL${vol!=null?" ("+vol+"m³)":""}`;
+    else qStr=`${nb} u.`;
+    doc.text(qStr.slice(0,14),cols.qte+1,y+4);
+
+    // 2ème ligne : dims détaillées si m²/mL
+    if(u==="m²"||u==="mL"||u==="m³direct"){
+      doc.setFontSize(7); doc.setTextColor(...GRIS);
+      let detail="";
+      if(l.epaisseur&&l.largeur&&l.longueur) detail=`${l.epaisseur}×${l.largeur}mm · ${l.longueur}m`;
+      else if(l.epaisseur&&l.largeur) detail=`${l.epaisseur}×${l.largeur}mm`;
+      if(detail) doc.text(detail,cols.prod+1,y+8.5);
+      doc.setFontSize(9); doc.setTextColor(...NOIR);
+    }
+
+    // Case à cocher
+    doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.4);
+    doc.rect(cols.check+3,y+2,7,7);
+
+    // Ligne séparatrice
+    doc.setLineWidth(0.2);
+    doc.line(14,y+rowH,206,y+rowH);
+    y+=rowH;
+
+    // Nouvelle page si besoin
+    if(y>260){
+      doc.addPage();
+      y=14;
+      // Répéter l'en-tête
+      doc.setFillColor(...BRUN);
+      doc.rect(14,y,192,8,"F");
+      doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(250,243,232);
+      doc.text("N°",cols.n+1,y+5.5);doc.text("Produit",cols.prod+1,y+5.5);
+      doc.text("Essence",cols.ess+1,y+5.5);doc.text("Qualité",cols.qual+1,y+5.5);
+      doc.text("Ép.",cols.ep+1,y+5.5);doc.text("Larg.",cols.la+1,y+5.5);
+      doc.text("Long.",cols.lo+1,y+5.5);doc.text("Qté / Vol.",cols.qte+1,y+5.5);
+      doc.text("✓",cols.check+6,y+5.5,{align:"center"});
+      y+=8;
+    }
+  });
+
+  y+=8;
+
+  // ── TOTAUX ──
+  const totalVol=(cmd.lignes||[]).reduce((acc,l)=>{const v=volLigneM3(l);return acc+(v||0);},0);
+  if(totalVol>0){
+    doc.setFillColor(240,248,240);
+    doc.roundedRect(14,y,192,10,2,2,"F");
+    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...VERT);
+    doc.text(`Volume total : ${round(totalVol,4)} m³`,18,y+7);
+    doc.text(`Nombre de produits : ${(cmd.lignes||[]).length}`,110,y+7);
+    y+=16;
+  }
+
+  // ── ZONE SIGNATURE ──
+  y=Math.max(y,250);
+  doc.setDrawColor(...GRIS_L); doc.line(14,y,206,y); y+=6;
+  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...GRIS);
+  doc.text("Signature du scieur / date de réalisation :",14,y);
+  doc.setDrawColor(...GRIS_L);
+  doc.rect(14,y+4,90,14);
+  doc.text("Observations :",120,y);
+  doc.rect(120,y+4,86,14);
+
+  // ── FOOTER ──
+  doc.setFontSize(7); doc.setTextColor(...GRIS);
+  doc.text(`EXPLOITATION VERDON · ${cmd.id} · Bon de sciage`,105,291,{align:"center"});
+
+  const blob=doc.output('blob');
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`Bon_sciage_${cmd.id}_${(cmd.client||"client").replace(/[^a-zA-Z0-9]/g,'_')}.pdf`;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
+}
+
 async function genererDevisPDF(form, cmdId){
   const loadJsPDF = () => new Promise((resolve, reject) => {
     if(window.jspdf && window.jspdf.jsPDF){ resolve(window.jspdf.jsPDF); return; }
@@ -1805,10 +1995,17 @@ export default function App(){
                     );
                   })}
                 </div>
-                <button style={{...S.btnSmall,width:"100%",textAlign:"center",background:isOpen?"rgba(91,184,212,.12)":"rgba(212,168,83,.06)",color:isOpen?"#5bb8d4":"#34C759",borderColor:isOpen?"rgba(91,184,212,.3)":"rgba(212,168,83,.2)"}}
-                  onClick={()=>{if(!isOpen){initCubeCmd(cmd);setExpand(cmd.id);}else setExpand(null);}}>
-                  {isOpen?"▲ Fermer":"👁 Voir commande"}
-                </button>
+                <div style={{display:"flex",gap:8}}>
+                  <button style={{...S.btnSmall,flex:1,textAlign:"center",background:isOpen?"rgba(91,184,212,.12)":"rgba(212,168,83,.06)",color:isOpen?"#5bb8d4":"#34C759",borderColor:isOpen?"rgba(91,184,212,.3)":"rgba(212,168,83,.2)"}}
+                    onClick={()=>{if(!isOpen){initCubeCmd(cmd);setExpand(cmd.id);}else setExpand(null);}}>
+                    {isOpen?"▲ Fermer":"👁 Voir commande"}
+                  </button>
+                  <button style={{...S.btnSmall,padding:"8px 12px",textAlign:"center",color:"#8A9BB0",borderColor:"rgba(255,255,255,.1)"}}
+                    onClick={()=>imprimerCommande(cmd)}
+                    title="Imprimer la liste de sciage">
+                    🖨
+                  </button>
+                </div>
 
                 {isOpen&&cubeCmd&&(
                   <div style={{marginTop:14,borderTop:"1px solid rgba(91,184,212,.15)",paddingTop:14}}>
