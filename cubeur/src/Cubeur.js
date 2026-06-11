@@ -300,17 +300,7 @@ async function imprimerCommande(cmd){
     else qStr=`${nb} u.`;
     doc.text(qStr.slice(0,14),cols.qte+1,y+4);
 
-    // 2ème ligne : dims sous le nom du produit (tous modes)
-    {
-      doc.setFontSize(7); doc.setTextColor(...GRIS);
-      let detail="";
-      const loNum=pf(l.longueur);
-      if(l.epaisseur&&l.largeur&&loNum>0) detail=`${l.epaisseur}x${l.largeur}mm · ${loNum}m`;
-      else if(l.epaisseur&&l.largeur) detail=`${l.epaisseur}x${l.largeur}mm`;
-      else if(loNum>0) detail=`${loNum}m`;
-      if(detail) doc.text(detail,cols.prod+1,y+9);
-      doc.setFontSize(8); doc.setTextColor(...NOIR);
-    }
+    doc.setFontSize(8); doc.setTextColor(...NOIR);
 
     // Case à cocher
     doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.4);
