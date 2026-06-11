@@ -905,7 +905,20 @@ async function genererFacturePDF(form, cmdId){
   y+=7;
 
   let totalHT=0;
+  const MAX_Y_FACT = 210;
+  const reHeaderFact = () => {
+    doc.setFillColor(...BG_TABLE);
+    doc.rect(14,y,182,7,"F");
+    doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...NOIR);
+    doc.text("Produits",CL.prod+1,y+5);
+    doc.text("Qte",(CL.qte+CL.pu)/2,y+5,{align:"center"});
+    doc.text("Prix u. HT",(CL.pu+CL.tva)/2,y+5,{align:"center"});
+    doc.text("TVA (%)",(CL.tva+CL.total)/2-4,y+5,{align:"center"});
+    doc.text("Total HT",CL.total,y+5,{align:"right"});
+    y+=7;
+  };
   (form.lignes||[]).forEach((l,i)=>{
+    if(y+8>MAX_Y_FACT){ doc.addPage(); y=14; reHeaderFact(); }
     const u=l.unite||"m3";
     const nb=pf(l.quantite)||0;
     const isTTC=(l.typeTaxe||"HT")==="TTC";
@@ -948,6 +961,13 @@ async function genererFacturePDF(form, cmdId){
   });
 
   y+=6;
+  // S'assurer qu'il reste au moins 90mm pour TVA+récap+paiement+mentions
+  if(y > 200){
+    doc.setFontSize(7); doc.setTextColor(...GRIS);
+    doc.text("EXPLOITATION VERDON | Entrepreneur individuel | N° SIREN 881.432.348 | N° de TVA FR38881432348",105,290,{align:"center"});
+    doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.2); doc.line(14,285,196,285);
+    doc.addPage(); y=14;
+  }
 
   // Ligne livraison
   const livrType=form.livraisonType||"";
@@ -1043,10 +1063,15 @@ async function genererFacturePDF(form, cmdId){
   doc.text("Penalites de retard : trois fois le taux annuel d'interet legal en vigueur calcule depuis la date d'echeance jusqu'a complet paiement du prix.",14,y); y+=4;
   doc.text("Indemnite forfaitaire pour frais de recouvrement en cas de retard de paiement : 40 €",14,y);
 
-  // ── FOOTER ──
-  doc.setFontSize(7); doc.setTextColor(...GRIS);
-  doc.text("EXPLOITATION VERDON | Entrepreneur individuel | N° SIREN 881.432.348 | N° de TVA FR38881432348",105,290,{align:"center"});
-  doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.2); doc.line(14,285,196,285);
+  // ── FOOTER toutes pages ──
+  const totalPagesFact=doc.getNumberOfPages();
+  for(let pg=1;pg<=totalPagesFact;pg++){
+    doc.setPage(pg);
+    doc.setFontSize(7); doc.setTextColor(...GRIS);
+    doc.text("EXPLOITATION VERDON | Entrepreneur individuel | N° SIREN 881.432.348 | N° de TVA FR38881432348",105,290,{align:"center"});
+    doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.2); doc.line(14,285,196,285);
+    if(totalPagesFact>1) doc.text(`Page ${pg}/${totalPagesFact}`,196,290,{align:"right"});
+  }
 
   // Téléchargement
   const blob=doc.output('blob');
