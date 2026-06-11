@@ -196,7 +196,14 @@ async function imprimerCommande(cmd){
   const VERT=[45,106,79], VERT_L=[240,255,245];
   const BRUN=[44,26,10], OR=[196,144,74];
 
-  const fmtDateDoc=(d)=>{if(!d)return"—";try{return new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"});}catch(e){return d;}};
+  const fmtDateDoc=(d)=>{
+    if(!d)return"—";
+    try{
+      const dt=new Date(d);
+      if(isNaN(dt.getTime())) return d;
+      return dt.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"});
+    }catch(e){return d;}
+  };
   const today=new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 
   // ── EN-TÊTE ──
@@ -240,13 +247,13 @@ async function imprimerCommande(cmd){
 
   // ── TABLEAU PRODUITS ──
   // Colonnes : N° | Produit | Essence | Qualité | Ép.mm | Larg.mm | Long.m | Quantité/Volume | ✓
-  const cols={n:14,prod:22,ess:60,qual:90,ep:115,la:130,lo:145,qte:163,check:192,end:206};
+  const cols={n:14,prod:22,ess:58,qual:86,ep:110,la:124,lo:138,qte:155,check:191,end:206};
 
   // En-tête
   doc.setFillColor(...BRUN);
   doc.rect(14,y,192,8,"F");
   doc.setFont("helvetica","bold");
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(250,243,232);
   doc.text("N°",cols.n+1,y+5.5);
   doc.text("Produit",cols.prod+1,y+5.5);
@@ -271,10 +278,10 @@ async function imprimerCommande(cmd){
     doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...BRUN);
     doc.text(String(i+1),cols.n+2,y+4);
 
-    doc.setFont("helvetica","normal"); doc.setTextColor(...NOIR);
-    doc.text((l.produit||"—").slice(0,14),cols.prod+1,y+4);
-    doc.text((l.essence||"—").slice(0,12),cols.ess+1,y+4);
-    doc.text((l.qualite||"—").slice(0,12),cols.qual+1,y+4);
+    doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...NOIR);
+    doc.text((l.produit||"—").slice(0,16),cols.prod+1,y+4);
+    doc.text((l.essence||"—").slice(0,10),cols.ess+1,y+4);
+    doc.text((l.qualite||"—").slice(0,9),cols.qual+1,y+4);
 
     // Dimensions
     doc.setFont("helvetica","bold"); doc.setTextColor(...BRUN);
@@ -317,7 +324,7 @@ async function imprimerCommande(cmd){
       // Répéter l'en-tête
       doc.setFillColor(...BRUN);
       doc.rect(14,y,192,8,"F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(250,243,232);
+      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(250,243,232);
       doc.text("N°",cols.n+1,y+5.5);doc.text("Produit",cols.prod+1,y+5.5);
       doc.text("Essence",cols.ess+1,y+5.5);doc.text("Qualité",cols.qual+1,y+5.5);
       doc.text("Ép.",cols.ep+1,y+5.5);doc.text("Larg.",cols.la+1,y+5.5);
@@ -341,14 +348,28 @@ async function imprimerCommande(cmd){
   }
 
   // ── ZONE SIGNATURE ──
-  y=Math.max(y,250);
-  doc.setDrawColor(...GRIS_L); doc.line(14,y,206,y); y+=6;
-  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...GRIS);
-  doc.text("Signature du scieur / date de réalisation :",14,y);
-  doc.setDrawColor(...GRIS_L);
-  doc.rect(14,y+4,90,14);
-  doc.text("Observations :",120,y);
-  doc.rect(120,y+4,86,14);
+  y=Math.max(y,230);
+  doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.4); doc.line(14,y,206,y); y+=8;
+  doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(...NOIR);
+  doc.text("Signature du scieur",14,y);
+  doc.text("Observations / Remarques",115,y);
+  y+=4;
+  // Boîte signature
+  doc.setFillColor(252,252,252);
+  doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.5);
+  doc.roundedRect(14,y,90,28,1,1,"FD");
+  doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+  doc.text("Nom :",16,y+6);
+  doc.line(16,y+7,100,y+7);
+  doc.text("Date :",16,y+14);
+  doc.line(16,y+15,100,y+15);
+  doc.text("Signature :",16,y+22);
+  doc.line(16,y+23,100,y+23);
+  // Boîte observations
+  doc.setFillColor(252,252,252);
+  doc.roundedRect(115,y,91,28,1,1,"FD");
+  doc.setTextColor(...GRIS);
+  doc.text("",117,y+6);
 
   // ── FOOTER ──
   doc.setFontSize(7); doc.setTextColor(...GRIS);
