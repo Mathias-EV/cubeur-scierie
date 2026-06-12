@@ -132,14 +132,14 @@ function calculParUnite(p){
   const la=pf(p.largeur)/1000;
   const lo=pf(p.longueur);
   const nb=pf(p.nbUnites);
-  const vg=pf(p.volumeGrume);
+  const vg=pf(p.volumeGrume)||0; // grume optionnelle
   const unite=p.unite||"m³";
 
   // m³ : toutes les dims + nb obligatoires
   if(unite==="m³"){
     if(!ep||!la||!lo||!nb) return null;
     const vu=round(ep*la*lo,6), vc=round(vu*nb,4);
-    const rend=vg>0?round(vc/vg,4):null;
+    const rend=vg>0?round(vc/vg,4):0; // 0 si grume absente
     const perte=rend!=null?round(1-rend,4):null;
     return { volUnit:vu, volCharge:vc, volReel:null, rend, perte, unite };
   }
@@ -1321,11 +1321,10 @@ export default function App(){
 
   const isPret=(p)=>{
     const u=p.unite||"m³";
+    // Grume toujours optionnelle — seules les dimensions + quantité sont obligatoires
     if(u==="m³"){
-      // m³ : toutes les dims + grume obligatoires
-      return p.epaisseur&&p.largeur&&p.longueur&&p.nbUnites&&p.volumeGrume&&!p.exported&&!p.exporting;
+      return p.epaisseur&&p.largeur&&p.longueur&&p.nbUnites&&!p.exported&&!p.exporting;
     }
-    // m² et mL : seule la quantité est obligatoire, dims optionnelles
     return p.nbUnites&&!p.exported&&!p.exporting;
   };
 
@@ -1341,7 +1340,7 @@ export default function App(){
     const res=calculParUnite(p);
     if(!res){showToast("Données incomplètes","error");return;}
     const {volUnit:vu,volCharge:vc,rend,perte}=res;
-    const vg=parseFloat(p.volumeGrume)||0;
+    const vg=pf(p.volumeGrume)||0; // 0 si grume non renseignée
     const unite=p.unite||"m³";
 
     const row=[date,cmd.id,pid,p.produit,p.essence,p.qualite,
@@ -1970,15 +1969,16 @@ export default function App(){
                     </div>
                     {(c.lignes||[]).map((l,i)=>(
                       <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
-                        • <strong style={{color:"#34C759"}}>{l.produit}</strong>{l.essence?` · ${l.essence}`:""}{l.qualite?` · ${l.qualite}`:""}
-                        <span style={{color:"#5bb8d4",fontSize:11}}> [{l.unite||"m³"}]</span>
+                        • <strong style={{color:"#34C759"}}>{l.produit}</strong>{l.essence?` · ${l.essence}`:""}
+                        <span style={{color:"#5bb8d4",fontSize:10}}> [{l.unite||"m³"}]</span>
+
                         <span style={{color:"#8A9BB0",fontFamily:"monospace",fontSize:11}}> — {dimLabel(l)}</span>
                       </div>
                     ))}
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6,marginBottom:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500,fontSize:13}}>{(d=>d?new Date(d).toLocaleDateString('fr-FR'):"—")(c.dateLivraison||c.datelivraison)}</strong></div>
                     <div style={{display:"flex",gap:6}}>
                       <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center"}}
-                        onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
+                        onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
                       <button style={{...S.btnSmall,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center",color:"#0A84FF",borderColor:"rgba(10,132,255,.3)"}}
                         onClick={()=>genererFacturePDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur Facture: '+e.message))}>🧾 Facture</button>
                       {["attente","En attente"].includes(c.statut||"attente")&&
@@ -2227,6 +2227,8 @@ export default function App(){
                         adresseClient:histDetail.adresseClient||"",
                         adresseLivraison:histDetail.adresseLivraison||"",
                         remise:histDetail.remise||"",
+                        livraisonType:histDetail.livraisonType||"",
+                        livraisonVal:histDetail.livraisonVal||"",
                         lignes:(histDetail.lignes||[]).map(l=>({
                           produit:l.produit, essence:l.essence, qualite:l.qualite,
                           epaisseur:l.epaisseur, largeur:l.largeur, longueur:l.longueur,
