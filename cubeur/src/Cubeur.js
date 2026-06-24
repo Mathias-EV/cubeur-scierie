@@ -12,7 +12,7 @@ const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
-const initCmd   = { client:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
+const initCmd   = { client:"",chantier:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -505,7 +505,8 @@ async function genererDevisPDF(form, cmdId){
   doc.setFontSize(9);
   doc.setTextColor(OR_R, OR_G, OR_B);
   doc.text(form.client||"—", 112, 47);
-  let yc = 52;
+  if(form.chantier){ doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(...GRIS); doc.text(form.chantier, 112, 52); }
+  let yc = form.chantier ? 57 : 52;
   doc.setFont("helvetica","normal");
   doc.setFontSize(8);
   doc.setTextColor(...NOIR);
@@ -851,7 +852,8 @@ async function genererFacturePDF(form, cmdId){
   doc.setFontSize(8.5);
   doc.setTextColor(...ORANGE);
   doc.text(form.client||"—",110,47);
-  let yc=52;
+  if(form.chantier){ doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(...GRIS); doc.text(form.chantier,110,52); }
+  let yc=form.chantier?57:52;
   doc.setFont("helvetica","normal");
   doc.setFontSize(8);
   doc.setTextColor(...NOIR);
@@ -1132,7 +1134,7 @@ function dimLabel(l){
 }
 
 
-const APPS_SCRIPT_TEXT = "function doGet(e) {\n  var ss = SpreadsheetApp.openById(\"1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4\");\n  var action = e.parameter.action;\n\n  if(action === \"getCommandes\") {\n    var sheet = ss.getSheetByName(\"Vendeur\");\n    if(!sheet||sheet.getLastRow()<2) return json({commandes:[]});\n    var rows = sheet.getDataRange().getValues();\n    var h = rows[0].map(String), map={}, order=[];\n    rows.slice(1).forEach(function(r){\n      var o={}; h.forEach(function(k,i){o[k]=String(r[i]===null||r[i]===undefined?\"\":r[i]);});\n      var id=o[\"id\"].trim();\n      if(id){\n        map[id]={id:id,client:o[\"client\"],\n          dateLivraison:o[\"dateLivraison\"],notes:o[\"notes\"],\n          statut:o[\"statut\"]||\"attente\",\n          dateCreation:o[\"dateCreation\"],lignes:[]};\n        order.push(id);\n      }\n      var cid=id||order[order.length-1];\n      if(cid&&map[cid]) map[cid].lignes.push({\n        produit:o[\"produit\"],essence:o[\"essence\"],\n        qualite:o[\"qualite\"],epaisseur:o[\"epaisseur\"],\n        largeur:o[\"largeur\"],\n        longueur:(function(){var v=String(o[\"longueur\"]||\"\").trim();if(!v||v===\"0\")return \"\";var n=parseFloat(v);return(!isNaN(n)&&n>0)?String(n):\"\";})(),\n        quantite:(function(){var v=String(o[\"quantite\"]||\"\").trim();if(!v||v===\"0\")return \"\";var n=parseFloat(v);return(!isNaN(n)&&n>0)?String(n):\"\";})(),prodId:o[\"prodId\"]||\"\",\n        unite:o[\"unite\"]||\"m\u00b3\",\n        prixUnitaire:o[\"prixUnitaire\"]||\"\",\n        typePrix:o[\"typePrix\"]||o[\"unite\"]||\"m\u00b3\",\n        typeTaxe:o[\"typeTaxe\"]||\"HT\"\n      });\n      if(o[\"id\"].trim()&&map[cid]){\n        if(o[\"adresseClient\"]) map[cid].adresseClient=o[\"adresseClient\"];\n        if(o[\"adresseLivraison\"]) map[cid].adresseLivraison=o[\"adresseLivraison\"];\n        map[cid].remise=o[\"remise\"]||\"\";\n        map[cid].livraisonType=o[\"livraisonType\"]||\"\";\n        map[cid].livraisonVal=o[\"livraisonVal\"]||\"\";\n      }\n    });\n    return json({commandes:order.map(function(id){return map[id];})});\n  }\n\n  if(action === \"getHistorique\") {\n    var sheet = ss.getSheetByName(\"Historique\");\n    if(!sheet||sheet.getLastRow()<2) return json({historique:[]});\n    var data = sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues().flat();\n    var historique = data.map(function(cell){\n      try{ return JSON.parse(cell); }catch(e){ return null; }\n    }).filter(Boolean);\n    return json({historique:historique});\n  }\n\n  return json({ok:true});\n}\n\nfunction doPost(e) {\n  var d=JSON.parse(e.postData.contents);\n  var ss=SpreadsheetApp.openById(\"1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4\");\n\n  if(d.type===\"commande\"){\n    var s=ss.getSheetByName(\"Vendeur\")||ss.insertSheet(\"Vendeur\");\n    var header=[\"id\",\"client\",\"produit\",\"essence\",\"qualite\",\n      \"epaisseur\",\"largeur\",\"longueur\",\"quantite\",\n      \"dateLivraison\",\"notes\",\"statut\",\"dateCreation\",\"prodId\",\"unite\",\n      \"prixUnitaire\",\"typePrix\",\"typeTaxe\",\"adresseClient\",\"adresseLivraison\",\"remise\",\"livraisonType\",\"livraisonVal\"];\n    if(s.getLastRow()===0){\n      s.appendRow(header);\n    } else {\n      var existingHeader=s.getRange(1,1,1,s.getLastColumn()).getValues()[0].map(String);\n      var requiredCols=[\"remise\",\"livraisonType\",\"livraisonVal\"];\n      requiredCols.forEach(function(col){\n        if(existingHeader.indexOf(col)===-1){\n          s.getRange(1,existingHeader.length+1).setValue(col);\n          existingHeader.push(col);\n        }\n      });\n    }\n    var ids=s.getLastRow()>1\n      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];\n    if(ids.indexOf(String(d.id))===-1){\n      // Formater les colonnes longueur (H=8) et quantite (I=9) en texte pour \u00e9viter conversion en date\n      if(s.getLastRow()<=1){\n        s.getRange(2,8,1000,1).setNumberFormat(\"@\");\n        s.getRange(2,9,1000,1).setNumberFormat(\"@\");\n      }\n      d.rows.forEach(function(row){s.appendRow(row);});\n    }\n  }\n\n  if(d.type===\"updateStatut\"){\n    var s=ss.getSheetByName(\"Vendeur\");\n    if(s&&s.getLastRow()>1){\n      var v=s.getRange(2,1,s.getLastRow()-1,13).getValues();\n      var inBlock=false;\n      for(var i=0;i<v.length;i++){\n        var cid=String(v[i][0]).trim();\n        if(cid===String(d.id).trim()){s.getRange(i+2,12).setValue(d.statut);inBlock=true;}\n        else if(inBlock&&cid===\"\"){s.getRange(i+2,12).setValue(d.statut);}\n        else if(inBlock&&cid!==\"\"){break;}\n      }\n    }\n  }\n\n  if(d.type===\"deleteCommande\"){\n    var s=ss.getSheetByName(\"Vendeur\");\n    if(s&&s.getLastRow()>1){\n      var v=s.getRange(2,1,s.getLastRow()-1,1).getValues();\n      var start=-1,end=-1;\n      for(var i=0;i<v.length;i++){\n        var c=String(v[i][0]).trim();\n        if(c===String(d.id).trim()){start=i+2;end=i+2;}\n        else if(start>0&&c===\"\"){end=i+2;}\n        else if(start>0&&c!==\"\"){break;}\n      }\n      if(start>0){for(var r=end;r>=start;r--)s.deleteRow(r);}\n    }\n  }\n\n  if(d.type===\"cubageProduit\"){\n    var s=ss.getSheetByName(\"Scieur\")||ss.insertSheet(\"Scieur\");\n    if(s.getLastRow()===0)\n      s.appendRow([\"Date\",\"Cmd ID\",\"Prod ID\",\"Produit\",\"Essence\",\n        \"Qualite\",\"Ep.mm\",\"Larg.mm\",\"Long.m\",\"Nb unites\",\n        \"Vol.Grume m3\",\"Vol.Unitaire\",\"Vol.Charge\",\"Rendement\",\"Perte\",\"Unite\"]);\n    var col3=s.getLastRow()>1\n      ?s.getRange(2,3,s.getLastRow()-1,1).getValues().flat().map(String):[];\n    if(col3.indexOf(String(d.id))===-1) s.appendRow(d.row);\n  }\n\n  if(d.type===\"saveHistorique\"){\n    var s=ss.getSheetByName(\"Historique\")||ss.insertSheet(\"Historique\");\n    if(s.getLastRow()===0) s.appendRow([\"data_json\"]);\n    var existing=s.getLastRow()>1\n      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat():[];\n    var alreadyIn=existing.some(function(cell){\n      try{return JSON.parse(cell).id===d.entry.id;}catch(e){return false;}\n    });\n    if(!alreadyIn) s.appendRow([JSON.stringify(d.entry)]);\n  }\n\n  return ContentService.createTextOutput(JSON.stringify({ok:true}))\n    .setMimeType(ContentService.MimeType.JSON);\n}\nfunction json(o){\n  return ContentService.createTextOutput(JSON.stringify(o))\n    .setMimeType(ContentService.MimeType.JSON);\n}";
+const APPS_SCRIPT_TEXT = "function doGet(e) {\n  var ss = SpreadsheetApp.openById(\"1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4\");\n  var action = e.parameter.action;\n\n  if(action === \"getCommandes\") {\n    var sheet = ss.getSheetByName(\"Vendeur\");\n    if(!sheet||sheet.getLastRow()<2) return json({commandes:[]});\n    var rows = sheet.getDataRange().getValues();\n    var h = rows[0].map(String), map={}, order=[];\n    rows.slice(1).forEach(function(r){\n      var o={}; h.forEach(function(k,i){o[k]=String(r[i]===null||r[i]===undefined?\"\":r[i]);});\n      var id=o[\"id\"].trim();\n      if(id){\n        map[id]={id:id,client:o[\"client\"],\n          dateLivraison:o[\"dateLivraison\"],notes:o[\"notes\"],\n          statut:o[\"statut\"]||\"attente\",\n          dateCreation:o[\"dateCreation\"],lignes:[]};\n        order.push(id);\n      }\n      var cid=id||order[order.length-1];\n      if(cid&&map[cid]) map[cid].lignes.push({\n        produit:o[\"produit\"],essence:o[\"essence\"],\n        qualite:o[\"qualite\"],epaisseur:o[\"epaisseur\"],\n        largeur:o[\"largeur\"],\n        longueur:(function(){var v=String(o[\"longueur\"]||\"\").trim();if(!v||v===\"0\")return \"\";var n=parseFloat(v);return(!isNaN(n)&&n>0)?String(n):\"\";})(),\n        quantite:(function(){var v=String(o[\"quantite\"]||\"\").trim();if(!v||v===\"0\")return \"\";var n=parseFloat(v);return(!isNaN(n)&&n>0)?String(n):\"\";})(),prodId:o[\"prodId\"]||\"\",\n        unite:o[\"unite\"]||\"m\u00b3\",\n        prixUnitaire:o[\"prixUnitaire\"]||\"\",\n        typePrix:o[\"typePrix\"]||o[\"unite\"]||\"m\u00b3\",\n        typeTaxe:o[\"typeTaxe\"]||\"HT\"\n      });\n      if(o[\"id\"].trim()&&map[cid]){\n        if(o[\"adresseClient\"]) map[cid].adresseClient=o[\"adresseClient\"];\n        if(o[\"adresseLivraison\"]) map[cid].adresseLivraison=o[\"adresseLivraison\"];\n        map[cid].remise=o[\"remise\"]||\"\";\n        map[cid].livraisonType=o[\"livraisonType\"]||\"\";\n        map[cid].livraisonVal=o[\"livraisonVal\"]||\"\";\n        map[cid].chantier=o[\"chantier\"]||\"\";\n      }\n    });\n    return json({commandes:order.map(function(id){return map[id];})});\n  }\n\n  if(action === \"getHistorique\") {\n    var sheet = ss.getSheetByName(\"Historique\");\n    if(!sheet||sheet.getLastRow()<2) return json({historique:[]});\n    var data = sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues().flat();\n    var historique = data.map(function(cell){\n      try{ return JSON.parse(cell); }catch(e){ return null; }\n    }).filter(Boolean);\n    return json({historique:historique});\n  }\n\n  return json({ok:true});\n}\n\nfunction doPost(e) {\n  var d=JSON.parse(e.postData.contents);\n  var ss=SpreadsheetApp.openById(\"1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4\");\n\n  if(d.type===\"commande\"){\n    var s=ss.getSheetByName(\"Vendeur\")||ss.insertSheet(\"Vendeur\");\n    var header=[\"id\",\"client\",\"produit\",\"essence\",\"qualite\",\n      \"epaisseur\",\"largeur\",\"longueur\",\"quantite\",\n      \"dateLivraison\",\"notes\",\"statut\",\"dateCreation\",\"prodId\",\"unite\",\n      \"prixUnitaire\",\"typePrix\",\"typeTaxe\",\"adresseClient\",\"adresseLivraison\",\"remise\",\"livraisonType\",\"livraisonVal\",\"chantier\"];\n    if(s.getLastRow()===0){\n      s.appendRow(header);\n    } else {\n      var existingHeader=s.getRange(1,1,1,s.getLastColumn()).getValues()[0].map(String);\n      var requiredCols=[\"remise\",\"livraisonType\",\"livraisonVal\",\"chantier\"];\n      requiredCols.forEach(function(col){\n        if(existingHeader.indexOf(col)===-1){\n          s.getRange(1,existingHeader.length+1).setValue(col);\n          existingHeader.push(col);\n        }\n      });\n    }\n    var ids=s.getLastRow()>1\n      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];\n    if(ids.indexOf(String(d.id))===-1){\n      // Formater les colonnes longueur (H=8) et quantite (I=9) en texte pour \u00e9viter conversion en date\n      if(s.getLastRow()<=1){\n        s.getRange(2,8,1000,1).setNumberFormat(\"@\");\n        s.getRange(2,9,1000,1).setNumberFormat(\"@\");\n      }\n      d.rows.forEach(function(row){s.appendRow(row);});\n    }\n  }\n\n  if(d.type===\"updateStatut\"){\n    var s=ss.getSheetByName(\"Vendeur\");\n    if(s&&s.getLastRow()>1){\n      var v=s.getRange(2,1,s.getLastRow()-1,13).getValues();\n      var inBlock=false;\n      for(var i=0;i<v.length;i++){\n        var cid=String(v[i][0]).trim();\n        if(cid===String(d.id).trim()){s.getRange(i+2,12).setValue(d.statut);inBlock=true;}\n        else if(inBlock&&cid===\"\"){s.getRange(i+2,12).setValue(d.statut);}\n        else if(inBlock&&cid!==\"\"){break;}\n      }\n    }\n  }\n\n  if(d.type===\"deleteCommande\"){\n    var s=ss.getSheetByName(\"Vendeur\");\n    if(s&&s.getLastRow()>1){\n      var v=s.getRange(2,1,s.getLastRow()-1,1).getValues();\n      var start=-1,end=-1;\n      for(var i=0;i<v.length;i++){\n        var c=String(v[i][0]).trim();\n        if(c===String(d.id).trim()){start=i+2;end=i+2;}\n        else if(start>0&&c===\"\"){end=i+2;}\n        else if(start>0&&c!==\"\"){break;}\n      }\n      if(start>0){for(var r=end;r>=start;r--)s.deleteRow(r);}\n    }\n  }\n\n  if(d.type===\"cubageProduit\"){\n    var s=ss.getSheetByName(\"Scieur\")||ss.insertSheet(\"Scieur\");\n    if(s.getLastRow()===0)\n      s.appendRow([\"Date\",\"Cmd ID\",\"Prod ID\",\"Produit\",\"Essence\",\n        \"Qualite\",\"Ep.mm\",\"Larg.mm\",\"Long.m\",\"Nb unites\",\n        \"Vol.Grume m3\",\"Vol.Unitaire\",\"Vol.Charge\",\"Rendement\",\"Perte\",\"Unite\"]);\n    var col3=s.getLastRow()>1\n      ?s.getRange(2,3,s.getLastRow()-1,1).getValues().flat().map(String):[];\n    if(col3.indexOf(String(d.id))===-1) s.appendRow(d.row);\n  }\n\n  if(d.type===\"saveHistorique\"){\n    var s=ss.getSheetByName(\"Historique\")||ss.insertSheet(\"Historique\");\n    if(s.getLastRow()===0) s.appendRow([\"data_json\"]);\n    var existing=s.getLastRow()>1\n      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat():[];\n    var alreadyIn=existing.some(function(cell){\n      try{return JSON.parse(cell).id===d.entry.id;}catch(e){return false;}\n    });\n    if(!alreadyIn) s.appendRow([JSON.stringify(d.entry)]);\n  }\n\n  return ContentService.createTextOutput(JSON.stringify({ok:true}))\n    .setMimeType(ContentService.MimeType.JSON);\n}\nfunction json(o){\n  return ContentService.createTextOutput(JSON.stringify(o))\n    .setMimeType(ContentService.MimeType.JSON);\n}";
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState("commande");
@@ -1237,7 +1239,7 @@ export default function App(){
   const slv=(i,v)=>{const tp=v==="m³direct"?"m³direct":v; setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:tp,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});};
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
-  const formValid=form.client&&form.dateLivraison&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
+  const formValid=form.client&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite); // date optionnelle
 
   const envoyer=async()=>{
     if(!formValid||!scriptUrl){if(!scriptUrl)showToast("URL Apps Script manquante","error");return;}
@@ -1260,7 +1262,8 @@ export default function App(){
       i===0?form.adresseLivraison||"":"",
       i===0?form.remise||"":"",
       i===0?form.livraisonType||"":"",
-      i===0?form.livraisonVal||"":""
+      i===0?form.livraisonVal||"":"",
+      i===0?form.chantier||"":""      // col 24 = chantier
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1505,10 +1508,15 @@ export default function App(){
             </div>
           }
           <Card title="Informations commande">
-            <Field label="Client / chantier" style={{marginBottom:12}}>
-              <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont - Chalet Megève"/>
-            </Field>
-            <Field label="Date de livraison souhaitée" style={{marginBottom:12}}>
+            <Row2 style={{marginBottom:12}}>
+              <Field label="Client *">
+                <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont"/>
+              </Field>
+              <Field label="Chantier / Référence">
+                <Inp value={form.chantier||""} onChange={sf("chantier")} ph="Ex: Chalet Megève"/>
+              </Field>
+            </Row2>
+            <Field label="Date de livraison (optionnel)" style={{marginBottom:12}}>
               <Inp type="date" value={form.dateLivraison} onChange={sf("dateLivraison")} min={today()}/>
             </Field>
             <Field label="Adresse client (optionnel)" style={{marginBottom:12}}>
@@ -1866,7 +1874,8 @@ export default function App(){
                     i===0?form.adresseClient||"":"", i===0?form.adresseLivraison||"":"",
                     i===0?form.remise||"":"",
                     i===0?form.livraisonType||"":"",
-                    i===0?form.livraisonVal||"":""
+                    i===0?form.livraisonVal||"":"",
+                    i===0?form.chantier||"":""
                   ]);
                   try{
                     await callScript(scriptUrl,{type:"commande",rows,id:bid});
@@ -1964,7 +1973,7 @@ export default function App(){
                 ):(
                   <>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                      <div><div style={{fontSize:11,color:"#8A9BB0",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}</div></div>
+                      <div><div style={{fontSize:11,color:"#8A9BB0",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}{c.chantier&&<span style={{color:"#8A9BB0",fontWeight:400,fontSize:13}}> — {c.chantier}</span>}</div></div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}><Badge status={c.statut||"attente"}/><button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button></div>
                     </div>
                     {(c.lignes||[]).map((l,i)=>(
@@ -1991,6 +2000,7 @@ export default function App(){
                               notes:c.notes||"",
                               adresseClient:c.adresseClient||"",
                               adresseLivraison:c.adresseLivraison||"",
+                              chantier:c.chantier||"",
                               remise:c.remise||"",
                               livraisonType:c.livraisonType||"",
                               livraisonVal:c.livraisonVal||"",
