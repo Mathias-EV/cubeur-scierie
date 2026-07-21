@@ -1251,7 +1251,7 @@ export default function App(){
   const slv=(i,v)=>{const tp=v==="m³direct"?"m³direct":v; setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],unite:v,typePrix:tp,epaisseur:"",largeur:"",longueur:"",quantite:""};return{...p,lignes:ls};});};
   const addL=()=>setForm(p=>({...p,lignes:[...p.lignes,{...initLigne}]}));
   const delL=i=>setForm(p=>({...p,lignes:p.lignes.filter((_,j)=>j!==i)}));
-  const formValid=form.client&&form.dateLivraison&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
+  const formValid=form.client&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
 
   const envoyer=async()=>{
     if(!formValid||!scriptUrl){if(!scriptUrl)showToast("URL Apps Script manquante","error");return;}
