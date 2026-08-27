@@ -1118,6 +1118,28 @@ function SelProduit({value,onChange,opts}){
     }
   </div>;
 }
+// Sélecteur essence avec option "Essence libre" → champ de saisie manuelle
+function SelEssence({value,onChange,opts}){
+  const isLibre = value!=="" && !opts.includes(value);
+  const [libreMode,setLibreMode] = useState(isLibre);
+  useEffect(()=>{ if(isLibre) setLibreMode(true); },[isLibre]);
+  const fakeEvt = v => ({target:{value:v}});
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <select style={S.select}
+      value={libreMode?"__libre__":value}
+      onChange={e=>{
+        if(e.target.value==="__libre__"){ setLibreMode(true); onChange(fakeEvt("")); }
+        else { setLibreMode(false); onChange(e); }
+      }}>
+      <option value="">— choisir —</option>
+      {opts.map(o=><option key={o} value={o}>{o}</option>)}
+      <option value="__libre__">✏️ Essence libre…</option>
+    </select>
+    {libreMode&&
+      <input style={S.input} value={value} onChange={onChange} placeholder="Saisir l'essence à la main"/>
+    }
+  </div>;
+}
 function Inp({value,onChange,ph,type="text",min,step,style}){ return <input type={type} style={{...S.input,...style}} value={value} onChange={onChange} placeholder={ph} min={min} step={step}/>; }
 function Num({value,onChange,ph}){ return <input style={{...S.input,...S.numInput}} type="text" inputMode="decimal" value={value} onChange={onChange} placeholder={ph}/>; }
 
@@ -1139,9 +1161,9 @@ function UniteSel({value,onChange}){
 
 function Card({title,children,accent,style}){ return <div style={{...S.card,...(accent?{borderColor:accent}:{}),...(style||{})}}>{title&&<div style={S.cardTitle}>{title}</div>}{children}</div>; }
 function Badge({status}){
-  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"],brouillon:["#1A1A2E","#9B59F7"]};
+  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"],brouillon:["#1A1A2E","#9B59F7"],devis_envoye:["#2E1A08","#FF9F0A"]};
   const [bg,fg]=map[status]||map.attente;
-  return <span style={{background:bg,color:fg,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,whiteSpace:"nowrap",letterSpacing:"0.02em"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée"}[status]||status}</span>;
+  return <span style={{background:bg,color:fg,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,whiteSpace:"nowrap",letterSpacing:"0.02em"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée",devis_envoye:"🕓 Devis envoyé"}[status]||status}</span>;
 }
 function Stat({label,value,color}){ return <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:color||"#34C759"}}>{value}</div><div style={{fontSize:9,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.07em",marginTop:2}}>{label}</div></div>; }
 function Empty({icon,text}){ return <div style={{textAlign:"center",padding:"50px 20px",color:"#4A5568"}}><div style={{fontSize:36,marginBottom:10}}>{icon}</div><div style={{fontSize:14,color:"#8A9BB0"}}>{text}</div></div>; }
@@ -1280,7 +1302,7 @@ export default function App(){
     const rows=form.lignes.map((l,i)=>[
       i===0?id:"", form.client, l.produit, l.essence, l.qualite,
       l.epaisseur, l.largeur, l.longueur, l.quantite,
-      form.dateLivraison, i===0?form.notes:"", "attente", i===0?dc:"",
+      form.dateLivraison, i===0?form.notes:"", "devis_envoye", i===0?dc:"",
       prodId(id,i), l.unite||"m³",
       l.prixUnitaire||"",
       l.typePrix||l.unite||"m³",
@@ -1308,6 +1330,13 @@ export default function App(){
     setCmd(c=>c.filter(x=>x.id!==id));
     setConfirmDel(null); setDeleting(false);
     showToast("Commande supprimée");
+  };
+
+  const accepterDevis=async(id)=>{
+    if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
+    try{await callScript(scriptUrl,{type:"updateStatut",id,statut:"attente"});}catch(e){}
+    setCmd(c=>c.map(x=>x.id===id?{...x,statut:"attente"}:x));
+    showToast("Devis accepté ✓ — commande en attente");
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1491,6 +1520,7 @@ export default function App(){
   };
 
   const cmdBrouillon=commandes.filter(c=>c.statut==="brouillon");
+  const cmdDevisEnvoye=commandes.filter(c=>c.statut==="devis_envoye");
   const cmdAtt=commandes.filter(c=>["attente","En attente"].includes(c.statut));
   const cmdProd=commandes.filter(c=>["production","En production"].includes(c.statut));
   const cmdVal=commandes.filter(c=>["valide","Validée"].includes(c.statut));
@@ -1630,7 +1660,7 @@ export default function App(){
               </Field>
               <Row2 style={{marginBottom:10}}>
                 <Field label="Produit"><SelProduit value={lg.produit} onChange={sl(i,"produit")} opts={PRODUITS}/></Field>
-                <Field label="Essence"><Sel value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
+                <Field label="Essence"><SelEssence value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
               </Row2>
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
@@ -1979,7 +2009,7 @@ export default function App(){
                 </Card>
               ))}
             </>}
-            {(cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
+            {(cmdDevisEnvoye.length>0||cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
             {commandes.filter(c=>c.statut!=='brouillon').map(c=>(
               <Card key={c.id}>
                 {confirmDel===c.id?(
@@ -2005,6 +2035,14 @@ export default function App(){
                       </div>
                     ))}
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6,marginBottom:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500,fontSize:13}}>{(d=>d?new Date(d).toLocaleDateString('fr-FR'):"—")(c.dateLivraison||c.datelivraison)}</strong></div>
+                    {c.statut==="devis_envoye"&&
+                      <div style={{display:"flex",gap:6,marginBottom:8}}>
+                        <button style={{...S.btnBig,margin:0,flex:1,fontSize:12,padding:"8px 8px",background:"rgba(52,199,89,.1)",color:"#34C759",border:"1px solid rgba(52,199,89,.35)"}}
+                          onClick={()=>accepterDevis(c.id)}>✓ Devis accepté</button>
+                        <button style={{...S.btnBig,margin:0,flex:1,fontSize:12,padding:"8px 8px",background:"rgba(255,69,58,.08)",color:"#FF453A",border:"1px solid rgba(255,69,58,.3)"}}
+                          onClick={()=>setConfirmDel(c.id)}>✗ Refusé</button>
+                      </div>
+                    }
                     <div style={{display:"flex",gap:6}}>
                       <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center"}}
                         onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
@@ -2333,7 +2371,7 @@ export default function App(){
             </Field>
             <Row2 style={{marginBottom:12}}>
               <Field label="Produit"><SelProduit value={freeForm.produit} onChange={sfree("produit")} opts={PRODUITS}/></Field>
-              <Field label="Essence"><Sel value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
+              <Field label="Essence"><SelEssence value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
             </Row2>
             <Field label="Qualité"><Sel value={freeForm.qualite} onChange={sfree("qualite")} opts={QUALITES}/></Field>
           </Card>
