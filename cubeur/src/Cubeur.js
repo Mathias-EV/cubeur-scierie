@@ -12,7 +12,7 @@ const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
-const initCmd   = { client:"",chantier:"",devisStatut:"en_attente",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
+const initCmd   = { client:"",clientId:"",chantier:"",devisStatut:"en_attente",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -1112,7 +1112,7 @@ function getSupabase(){
 }
 const sbStr=v=>(v===null||v===undefined)?"":String(v);
 const sbNum=v=>{ const t=sbStr(v).trim(); if(!t||t==="0")return ""; const n=parseFloat(t.replace(",",".")); return (!isNaN(n)&&n>0)?String(n):""; };
-const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut"];
+const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut","clientId","totalHT"];
 const SCIEUR_COLS=["date","cmd_id","prod_id","produit","essence","qualite","epaisseur","largeur","longueur","nb_unites","vol_grume","vol_unitaire","vol_charge","vol_reel","rendement","perte","unite"];
 // Lignes "Sheet" (tableaux positionnels) → 1 enregistrement commande
 function rowsToCommande(rows,id){
@@ -1124,6 +1124,7 @@ function rowsToCommande(rows,id){
     date_creation:h.dateCreation||"", adresse_client:h.adresseClient||"", adresse_livraison:h.adresseLivraison||"",
     remise:h.remise||"", livraison_type:h.livraisonType||"", livraison_val:h.livraisonVal||"",
     devis_statut:h.devisStatut||"en_attente",
+    client_id:h.clientId||null, total_ht:h.totalHT||"",
     lignes:objs.map(o=>({ produit:o.produit, essence:o.essence, qualite:o.qualite,
       epaisseur:o.epaisseur, largeur:o.largeur, longueur:o.longueur, quantite:o.quantite,
       prodId:o.prodId, unite:o.unite||"m³", prixUnitaire:o.prixUnitaire,
@@ -1137,6 +1138,7 @@ function commandeToApp(c){
     dateLivraison:sbStr(c.date_livraison), notes:sbStr(c.notes), statut:c.statut||"attente",
     dateCreation:sbStr(c.date_creation), adresseClient:sbStr(c.adresse_client), adresseLivraison:sbStr(c.adresse_livraison),
     remise:sbStr(c.remise), livraisonType:sbStr(c.livraison_type), livraisonVal:sbStr(c.livraison_val),
+    clientId:c.client_id||"", totalHT:sbStr(c.total_ht),
     devisStatut:c.devis_statut||"accepte", // anciennes commandes (avant l'option) = considérées acceptées
     lignes:(c.lignes||[]).map(l=>({ ...l,
       produit:sbStr(l.produit), essence:sbStr(l.essence), qualite:sbStr(l.qualite),
@@ -1171,6 +1173,46 @@ async function insertChunks(sb,table,rows,conflict){
   }
 }
 const dedupe=(arr,key)=>{ const m=new Map(); arr.forEach(x=>{ if(x&&x[key]&&!m.has(x[key])) m.set(x[key],x); }); return [...m.values()]; };
+
+// Total HT d'une commande (même calcul que le récapitulatif du formulaire)
+function totalCommandeHT(form){
+  const totalHT=(form.lignes||[]).reduce((acc,l)=>{
+    const h=ligneHT(l); const isTTC=(l.typeTaxe||"HT")==="TTC";
+    if(h==null) return acc; return acc+round(isTTC?round(h/1.2,2):h,2);
+  },0);
+  const remisePct=pf(form.remise);
+  const remiseMt=remisePct>0?round(totalHT*remisePct/100,2):0;
+  const livrHT=(form.livraisonType==="km"||form.livraisonType==="prix")?round(pf(form.livraisonVal)||0,2):0;
+  return round(totalHT-remiseMt+livrHT,2);
+}
+// Liste des clients du CRM (noms + adresse uniquement, via une fonction sécurisée)
+async function fetchClientsCRM(){
+  const sb=await getSupabase();
+  const {data,error}=await sb.rpc("liste_clients_crm");
+  if(error) throw new Error(error.message);
+  return (data||[]).filter(c=>c.nom&&c.nom.trim()).sort((a,b)=>a.nom.localeCompare(b.nom,"fr",{sensitivity:"base"}));
+}
+// Sélecteur client : liste du CRM + saisie libre (comme les produits)
+function SelClientCRM({value,clientId,clients,onPick}){
+  const isLibre = value!=="" && !clientId;
+  const [libreMode,setLibreMode]=useState(isLibre);
+  useEffect(()=>{ if(isLibre) setLibreMode(true); },[isLibre]);
+  const selVal = libreMode?"__libre__":(clientId||"");
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <select style={S.select} value={selVal} onChange={e=>{
+      const v=e.target.value;
+      if(v==="__libre__"){ setLibreMode(true); onPick({id:"",nom:"",adresse:""}); }
+      else if(v===""){ setLibreMode(false); onPick({id:"",nom:"",adresse:""}); }
+      else { setLibreMode(false); const c=clients.find(x=>x.id===v); if(c) onPick(c); }
+    }}>
+      <option value="">— choisir un client —</option>
+      {clientId&&!clients.some(c=>c.id===clientId)&&<option value={clientId}>{value}</option>}
+      {clients.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
+      <option value="__libre__">✏️ Client libre (hors CRM)…</option>
+    </select>
+    {libreMode&&<input style={S.input} value={value} onChange={e=>onPick({id:"",nom:e.target.value,adresse:null})} placeholder="Nom du client"/>}
+  </div>;
+}
 
 // Remplace l'ancien appel Apps Script : mêmes actions, mais vers Supabase
 async function callScript(_url, body){
@@ -1320,6 +1362,16 @@ export default function App(){
   const [oldUrl,setOldUrl]=useState(()=>localStorage.getItem(APPS_SCRIPT_URL_KEY)||"");
   const [migrating,setMigrating]=useState(false);
   const [migLog,setMigLog]=useState([]);
+
+  // ── Clients du CRM ──
+  const [crmClients,setCrmClients]=useState([]);
+  const [crmErr,setCrmErr]=useState("");
+  useEffect(()=>{
+    if(!session) return;
+    let alive=true;
+    fetchClientsCRM().then(l=>{ if(alive){ setCrmClients(l); setCrmErr(""); } }).catch(e=>{ if(alive) setCrmErr(e.message); });
+    return ()=>{ alive=false; };
+  },[session]);
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
@@ -1490,7 +1542,9 @@ export default function App(){
       i===0?form.livraisonType||"":"",
       i===0?form.livraisonVal||"":"",
       i===0?form.chantier||"":"",
-      i===0?(form.devisStatut||"en_attente"):""
+      i===0?(form.devisStatut||"en_attente"):"",
+      i===0?form.clientId||"":"",
+      i===0?String(totalCommandeHT(form)):""
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1751,7 +1805,10 @@ export default function App(){
           <Card title="Informations commande">
             <Row2 style={{marginBottom:12}}>
               <Field label="Client *">
-                <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont"/>
+                <SelClientCRM value={form.client} clientId={form.clientId||""} clients={crmClients}
+                  onPick={c=>setForm(p=>({...p,client:c.nom,clientId:c.id,
+                    adresseClient:(c.id&&c.adresse&&!p.adresseClient)?c.adresse:p.adresseClient}))}/>
+                {crmErr&&<div style={{fontSize:10,color:"#FF9F0A",marginTop:4}}>Liste CRM indisponible — saisie libre possible</div>}
               </Field>
               <Field label="Chantier / Référence">
                 <Inp value={form.chantier||""} onChange={sf("chantier")} ph="Ex: Chalet Megève"/>
@@ -2117,7 +2174,9 @@ export default function App(){
                     i===0?form.livraisonType||"":"",
                     i===0?form.livraisonVal||"":"",
                     i===0?form.chantier||"":"",
-                    i===0?(form.devisStatut||"en_attente"):""
+                    i===0?(form.devisStatut||"en_attente"):"",
+                    i===0?form.clientId||"":"",
+                    i===0?String(totalCommandeHT(form)):""
                   ]);
                   try{
                     await callScript(scriptUrl,{type:"commande",rows,id:bid});
@@ -2179,7 +2238,7 @@ export default function App(){
                       <button style={{...S.btnBig,marginBottom:0,background:"rgba(155,89,247,.1)",color:"#9B59F7",border:"1px solid rgba(155,89,247,.3)",fontSize:13}}
                         onClick={()=>{
                           setForm({
-                            client:c.client||"",chantier:c.chantier||"",devisStatut:"en_attente",dateLivraison:c.dateLivraison||c.datelivraison||"",
+                            client:c.client||"",clientId:c.clientId||"",chantier:c.chantier||"",devisStatut:"en_attente",dateLivraison:c.dateLivraison||c.datelivraison||"",
                             notes:c.notes||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",remise:c.remise||"",
                             livraisonType:c.livraisonType||"",livraisonVal:c.livraisonVal||"",
                             lignes:(c.lignes||[]).map(l=>({
@@ -2253,6 +2312,7 @@ export default function App(){
                             // Charger la commande dans le formulaire pour édition
                             setForm({
                               client:c.client||"",
+                              clientId:c.clientId||"",
                               chantier:c.chantier||"",
                               devisStatut:c.devisStatut||"en_attente",
                               dateLivraison:c.dateLivraison||c.datelivraison||"",
