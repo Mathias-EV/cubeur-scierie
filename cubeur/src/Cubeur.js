@@ -1084,9 +1084,137 @@ async function genererFacturePDF(form, cmdId){
 }
 
 
-async function callScript(url, body){
-  await fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+// ─── SUPABASE ─────────────────────────────────────────────────────────────────
+const SUPABASE_URL = "https://pqasjbrzcxiwnhddcnup.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxYXNqYnJ6Y3hpd25oZGRjbnVwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5ODI2NTQsImV4cCI6MjEwNTU1ODY1NH0.nOWQgvVWhKBHjfvrtY3ZrAoTsqEGsieX2hQmJFXQL8E";
+let _sbPromise=null;
+// Charge la librairie Supabase depuis le CDN (comme jsPDF) — aucune dépendance npm
+function getSupabase(){
+  if(_sbPromise) return _sbPromise;
+  _sbPromise=new Promise((resolve,reject)=>{
+    const make=()=>resolve(window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:"cubeur_sb_auth"}}));
+    if(window.supabase&&window.supabase.createClient){ make(); return; }
+    const sc=document.createElement("script");
+    sc.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+    sc.onload=()=>{ if(window.supabase&&window.supabase.createClient) make(); else { _sbPromise=null; reject(new Error("Librairie Supabase non chargée")); } };
+    sc.onerror=()=>{ _sbPromise=null; reject(new Error("Impossible de charger Supabase (connexion internet ?)")); };
+    document.head.appendChild(sc);
+  });
+  return _sbPromise;
+}
+const sbStr=v=>(v===null||v===undefined)?"":String(v);
+const sbNum=v=>{ const t=sbStr(v).trim(); if(!t||t==="0")return ""; const n=parseFloat(t.replace(",",".")); return (!isNaN(n)&&n>0)?String(n):""; };
+const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier"];
+const SCIEUR_COLS=["date","cmd_id","prod_id","produit","essence","qualite","epaisseur","largeur","longueur","nb_unites","vol_grume","vol_unitaire","vol_charge","vol_reel","rendement","perte","unite"];
+// Lignes "Sheet" (tableaux positionnels) → 1 enregistrement commande
+function rowsToCommande(rows,id){
+  const objs=(rows||[]).map(r=>{ const o={}; VENDEUR_COLS.forEach((k,i)=>{ o[k]=sbStr(r[i]); }); return o; });
+  const h=objs[0]||{};
+  return {
+    id:String(id), client:h.client||"", chantier:h.chantier||"",
+    date_livraison:h.dateLivraison||"", notes:h.notes||"", statut:h.statut||"attente",
+    date_creation:h.dateCreation||"", adresse_client:h.adresseClient||"", adresse_livraison:h.adresseLivraison||"",
+    remise:h.remise||"", livraison_type:h.livraisonType||"", livraison_val:h.livraisonVal||"",
+    lignes:objs.map(o=>({ produit:o.produit, essence:o.essence, qualite:o.qualite,
+      epaisseur:o.epaisseur, largeur:o.largeur, longueur:o.longueur, quantite:o.quantite,
+      prodId:o.prodId, unite:o.unite||"m³", prixUnitaire:o.prixUnitaire,
+      typePrix:o.typePrix||o.unite||"m³", typeTaxe:o.typeTaxe||"HT" }))
+  };
+}
+// Commande au format renvoyé par l'app (identique à l'ancien getCommandes)
+function commandeToApp(c){
+  return {
+    id:c.id, client:sbStr(c.client), chantier:sbStr(c.chantier),
+    dateLivraison:sbStr(c.date_livraison), notes:sbStr(c.notes), statut:c.statut||"attente",
+    dateCreation:sbStr(c.date_creation), adresseClient:sbStr(c.adresse_client), adresseLivraison:sbStr(c.adresse_livraison),
+    remise:sbStr(c.remise), livraisonType:sbStr(c.livraison_type), livraisonVal:sbStr(c.livraison_val),
+    lignes:(c.lignes||[]).map(l=>({ ...l,
+      produit:sbStr(l.produit), essence:sbStr(l.essence), qualite:sbStr(l.qualite),
+      epaisseur:sbStr(l.epaisseur), largeur:sbStr(l.largeur),
+      longueur:sbNum(l.longueur), quantite:sbNum(l.quantite), prodId:sbStr(l.prodId),
+      unite:l.unite||"m³", prixUnitaire:sbStr(l.prixUnitaire), typePrix:l.typePrix||l.unite||"m³", typeTaxe:l.typeTaxe||"HT" }))
+  };
+}
+function scieurRow(row,cle){
+  const r=[...(row||[])];
+  if(r.length===16) r.splice(13,0,""); // ancien format sans volume réel
+  const o={cle:String(cle)};
+  SCIEUR_COLS.forEach((k,i)=>{ o[k]=sbStr(r[i]); });
+  return o;
+}
+async function fetchCommandes(){
+  const sb=await getSupabase();
+  const {data,error}=await sb.from("commandes").select("*").order("seq",{ascending:true});
+  if(error) throw new Error(error.message);
+  return (data||[]).map(commandeToApp);
+}
+async function fetchHistorique(){
+  const sb=await getSupabase();
+  const {data,error}=await sb.from("historique").select("data").order("seq",{ascending:true});
+  if(error) throw new Error(error.message);
+  return (data||[]).map(r=>r.data).filter(Boolean);
+}
+async function insertChunks(sb,table,rows,conflict){
+  for(let i=0;i<rows.length;i+=300){
+    const {error}=await sb.from(table).upsert(rows.slice(i,i+300),{onConflict:conflict,ignoreDuplicates:true});
+    if(error) throw new Error(table+" : "+error.message);
+  }
+}
+const dedupe=(arr,key)=>{ const m=new Map(); arr.forEach(x=>{ if(x&&x[key]&&!m.has(x[key])) m.set(x[key],x); }); return [...m.values()]; };
+
+// Remplace l'ancien appel Apps Script : mêmes actions, mais vers Supabase
+async function callScript(_url, body){
+  const sb=await getSupabase();
+  let res=null;
+  if(body.type==="commande"){
+    res=await sb.from("commandes").upsert(rowsToCommande(body.rows,body.id),{onConflict:"id",ignoreDuplicates:true});
+  } else if(body.type==="updateStatut"){
+    res=await sb.from("commandes").update({statut:body.statut}).eq("id",String(body.id));
+  } else if(body.type==="deleteCommande"){
+    res=await sb.from("commandes").delete().eq("id",String(body.id));
+  } else if(body.type==="cubageProduit"){
+    res=await sb.from("scieur").upsert(scieurRow(body.row,body.id),{onConflict:"cle",ignoreDuplicates:true});
+  } else if(body.type==="saveHistorique"){
+    res=await sb.from("historique").upsert({id:String(body.entry.id),data:body.entry},{onConflict:"id",ignoreDuplicates:true});
+  }
+  if(res&&res.error) throw new Error(res.error.message);
   return {ok:true};
+}
+
+// Écran de connexion
+function LoginScreen({initialError}){
+  const [email,setEmail]=useState("");
+  const [pw,setPw]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(initialError||"");
+  const go=async()=>{
+    if(!email||!pw){ setMsg("Email et mot de passe requis"); return; }
+    setBusy(true); setMsg("");
+    try{
+      const sb=await getSupabase();
+      const {error}=await sb.auth.signInWithPassword({email:email.trim(),password:pw});
+      if(error) setMsg(/invalid login/i.test(error.message)?"Email ou mot de passe incorrect":error.message);
+    }catch(e){ setMsg(e.message); }
+    setBusy(false);
+  };
+  return (
+    <div style={S.root}>
+      <header style={S.header}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"#34C759",boxShadow:"0 0 8px rgba(52,199,89,.6)"}}/>
+          <span style={S.logoText}>SCIERIE</span>
+        </div>
+      </header>
+      <div style={{...S.page,paddingTop:40}}>
+        <Card title="Connexion">
+          <Field label="Email"><Inp type="email" value={email} onChange={e=>setEmail(e.target.value)} ph="vous@exemple.com"/></Field>
+          <Field label="Mot de passe" style={{marginTop:12}}><Inp type="password" value={pw} onChange={e=>setPw(e.target.value)} ph="••••••••"/></Field>
+          {msg&&<div style={{color:"#FF453A",fontSize:12,marginTop:12}}>{msg}</div>}
+          <button style={{...S.btnBig,marginTop:16,marginBottom:0,...(busy?S.btnDis:{})}} disabled={busy} onClick={go}>{busy?"Connexion…":"Se connecter"}</button>
+        </Card>
+      </div>
+    </div>
+  );
 }
 
 // ─── UI PRIMITIVES ────────────────────────────────────────────────────────────
@@ -1118,28 +1246,6 @@ function SelProduit({value,onChange,opts}){
     }
   </div>;
 }
-// Sélecteur essence avec option "Essence libre" → champ de saisie manuelle
-function SelEssence({value,onChange,opts}){
-  const isLibre = value!=="" && !opts.includes(value);
-  const [libreMode,setLibreMode] = useState(isLibre);
-  useEffect(()=>{ if(isLibre) setLibreMode(true); },[isLibre]);
-  const fakeEvt = v => ({target:{value:v}});
-  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
-    <select style={S.select}
-      value={libreMode?"__libre__":value}
-      onChange={e=>{
-        if(e.target.value==="__libre__"){ setLibreMode(true); onChange(fakeEvt("")); }
-        else { setLibreMode(false); onChange(e); }
-      }}>
-      <option value="">— choisir —</option>
-      {opts.map(o=><option key={o} value={o}>{o}</option>)}
-      <option value="__libre__">✏️ Essence libre…</option>
-    </select>
-    {libreMode&&
-      <input style={S.input} value={value} onChange={onChange} placeholder="Saisir l'essence à la main"/>
-    }
-  </div>;
-}
 function Inp({value,onChange,ph,type="text",min,step,style}){ return <input type={type} style={{...S.input,...style}} value={value} onChange={onChange} placeholder={ph} min={min} step={step}/>; }
 function Num({value,onChange,ph}){ return <input style={{...S.input,...S.numInput}} type="text" inputMode="decimal" value={value} onChange={onChange} placeholder={ph}/>; }
 
@@ -1161,9 +1267,9 @@ function UniteSel({value,onChange}){
 
 function Card({title,children,accent,style}){ return <div style={{...S.card,...(accent?{borderColor:accent}:{}),...(style||{})}}>{title&&<div style={S.cardTitle}>{title}</div>}{children}</div>; }
 function Badge({status}){
-  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"],brouillon:["#1A1A2E","#9B59F7"],devis_envoye:["#2E1A08","#FF9F0A"]};
+  const map={attente:["#2D2208","#FF9F0A"],production:["#0A1F35","#0A84FF"],valide:["#0A2E18","#34C759"],annule:["#2E0A0A","#FF453A"],brouillon:["#1A1A2E","#9B59F7"]};
   const [bg,fg]=map[status]||map.attente;
-  return <span style={{background:bg,color:fg,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,whiteSpace:"nowrap",letterSpacing:"0.02em"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée",devis_envoye:"🕓 Devis envoyé"}[status]||status}</span>;
+  return <span style={{background:bg,color:fg,padding:"3px 9px",borderRadius:20,fontSize:11,fontWeight:600,whiteSpace:"nowrap",letterSpacing:"0.02em"}}>{{attente:"En attente",production:"En production",valide:"✓ Validée",annule:"Annulée"}[status]||status}</span>;
 }
 function Stat({label,value,color}){ return <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"10px 8px",textAlign:"center"}}><div style={{fontSize:20,fontWeight:700,color:color||"#34C759"}}>{value}</div><div style={{fontSize:9,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.07em",marginTop:2}}>{label}</div></div>; }
 function Empty({icon,text}){ return <div style={{textAlign:"center",padding:"50px 20px",color:"#4A5568"}}><div style={{fontSize:36,marginBottom:10}}>{icon}</div><div style={{fontSize:14,color:"#8A9BB0"}}>{text}</div></div>; }
@@ -1177,11 +1283,31 @@ function dimLabel(l){
 }
 
 
-const APPS_SCRIPT_TEXT = "function doGet(e) {\n  var ss = SpreadsheetApp.openById(\"1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4\");\n  var action = e.parameter.action;\n\n  if(action === \"getCommandes\") {\n    var sheet = ss.getSheetByName(\"Vendeur\");\n    if(!sheet||sheet.getLastRow()<2) return json({commandes:[]});\n    var rows = sheet.getDataRange().getValues();\n    var h = rows[0].map(String), map={}, order=[];\n    rows.slice(1).forEach(function(r){\n      var o={}; h.forEach(function(k,i){o[k]=String(r[i]===null||r[i]===undefined?\"\":r[i]);});\n      var id=o[\"id\"].trim();\n      if(id){\n        map[id]={id:id,client:o[\"client\"],\n          dateLivraison:o[\"dateLivraison\"],notes:o[\"notes\"],\n          statut:o[\"statut\"]||\"attente\",\n          dateCreation:o[\"dateCreation\"],lignes:[]};\n        order.push(id);\n      }\n      var cid=id||order[order.length-1];\n      if(cid&&map[cid]) map[cid].lignes.push({\n        produit:o[\"produit\"],essence:o[\"essence\"],\n        qualite:o[\"qualite\"],epaisseur:o[\"epaisseur\"],\n        largeur:o[\"largeur\"],\n        longueur:(function(){var v=String(o[\"longueur\"]||\"\").trim();if(!v||v===\"0\")return \"\";var n=parseFloat(v);return(!isNaN(n)&&n>0)?String(n):\"\";})(),\n        quantite:(function(){var v=String(o[\"quantite\"]||\"\").trim();if(!v||v===\"0\")return \"\";var n=parseFloat(v);return(!isNaN(n)&&n>0)?String(n):\"\";})(),prodId:o[\"prodId\"]||\"\",\n        unite:o[\"unite\"]||\"m\u00b3\",\n        prixUnitaire:o[\"prixUnitaire\"]||\"\",\n        typePrix:o[\"typePrix\"]||o[\"unite\"]||\"m\u00b3\",\n        typeTaxe:o[\"typeTaxe\"]||\"HT\"\n      });\n      if(o[\"id\"].trim()&&map[cid]){\n        if(o[\"adresseClient\"]) map[cid].adresseClient=o[\"adresseClient\"];\n        if(o[\"adresseLivraison\"]) map[cid].adresseLivraison=o[\"adresseLivraison\"];\n        map[cid].remise=o[\"remise\"]||\"\";\n        map[cid].livraisonType=o[\"livraisonType\"]||\"\";\n        map[cid].livraisonVal=o[\"livraisonVal\"]||\"\";\n      }\n    });\n    return json({commandes:order.map(function(id){return map[id];})});\n  }\n\n  if(action === \"getHistorique\") {\n    var sheet = ss.getSheetByName(\"Historique\");\n    if(!sheet||sheet.getLastRow()<2) return json({historique:[]});\n    var data = sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues().flat();\n    var historique = data.map(function(cell){\n      try{ return JSON.parse(cell); }catch(e){ return null; }\n    }).filter(Boolean);\n    return json({historique:historique});\n  }\n\n  return json({ok:true});\n}\n\nfunction doPost(e) {\n  var d=JSON.parse(e.postData.contents);\n  var ss=SpreadsheetApp.openById(\"1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4\");\n\n  if(d.type===\"commande\"){\n    var s=ss.getSheetByName(\"Vendeur\")||ss.insertSheet(\"Vendeur\");\n    var header=[\"id\",\"client\",\"produit\",\"essence\",\"qualite\",\n      \"epaisseur\",\"largeur\",\"longueur\",\"quantite\",\n      \"dateLivraison\",\"notes\",\"statut\",\"dateCreation\",\"prodId\",\"unite\",\n      \"prixUnitaire\",\"typePrix\",\"typeTaxe\",\"adresseClient\",\"adresseLivraison\",\"remise\",\"livraisonType\",\"livraisonVal\"];\n    if(s.getLastRow()===0){\n      s.appendRow(header);\n    } else {\n      var existingHeader=s.getRange(1,1,1,s.getLastColumn()).getValues()[0].map(String);\n      var requiredCols=[\"remise\",\"livraisonType\",\"livraisonVal\"];\n      requiredCols.forEach(function(col){\n        if(existingHeader.indexOf(col)===-1){\n          s.getRange(1,existingHeader.length+1).setValue(col);\n          existingHeader.push(col);\n        }\n      });\n    }\n    var ids=s.getLastRow()>1\n      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat().map(String):[];\n    if(ids.indexOf(String(d.id))===-1){\n      // Formater les colonnes longueur (H=8) et quantite (I=9) en texte pour \u00e9viter conversion en date\n      if(s.getLastRow()<=1){\n        s.getRange(2,8,1000,1).setNumberFormat(\"@\");\n        s.getRange(2,9,1000,1).setNumberFormat(\"@\");\n      }\n      d.rows.forEach(function(row){s.appendRow(row);});\n    }\n  }\n\n  if(d.type===\"updateStatut\"){\n    var s=ss.getSheetByName(\"Vendeur\");\n    if(s&&s.getLastRow()>1){\n      var v=s.getRange(2,1,s.getLastRow()-1,13).getValues();\n      var inBlock=false;\n      for(var i=0;i<v.length;i++){\n        var cid=String(v[i][0]).trim();\n        if(cid===String(d.id).trim()){s.getRange(i+2,12).setValue(d.statut);inBlock=true;}\n        else if(inBlock&&cid===\"\"){s.getRange(i+2,12).setValue(d.statut);}\n        else if(inBlock&&cid!==\"\"){break;}\n      }\n    }\n  }\n\n  if(d.type===\"deleteCommande\"){\n    var s=ss.getSheetByName(\"Vendeur\");\n    if(s&&s.getLastRow()>1){\n      var v=s.getRange(2,1,s.getLastRow()-1,1).getValues();\n      var start=-1,end=-1;\n      for(var i=0;i<v.length;i++){\n        var c=String(v[i][0]).trim();\n        if(c===String(d.id).trim()){start=i+2;end=i+2;}\n        else if(start>0&&c===\"\"){end=i+2;}\n        else if(start>0&&c!==\"\"){break;}\n      }\n      if(start>0){for(var r=end;r>=start;r--)s.deleteRow(r);}\n    }\n  }\n\n  if(d.type===\"cubageProduit\"){\n    var s=ss.getSheetByName(\"Scieur\")||ss.insertSheet(\"Scieur\");\n    if(s.getLastRow()===0)\n      s.appendRow([\"Date\",\"Cmd ID\",\"Prod ID\",\"Produit\",\"Essence\",\n        \"Qualite\",\"Ep.mm\",\"Larg.mm\",\"Long.m\",\"Nb unites\",\n        \"Vol.Grume m3\",\"Vol.Unitaire\",\"Vol.Charge\",\"Rendement\",\"Perte\",\"Unite\"]);\n    var col3=s.getLastRow()>1\n      ?s.getRange(2,3,s.getLastRow()-1,1).getValues().flat().map(String):[];\n    if(col3.indexOf(String(d.id))===-1) s.appendRow(d.row);\n  }\n\n  if(d.type===\"saveHistorique\"){\n    var s=ss.getSheetByName(\"Historique\")||ss.insertSheet(\"Historique\");\n    if(s.getLastRow()===0) s.appendRow([\"data_json\"]);\n    var existing=s.getLastRow()>1\n      ?s.getRange(2,1,s.getLastRow()-1,1).getValues().flat():[];\n    var alreadyIn=existing.some(function(cell){\n      try{return JSON.parse(cell).id===d.entry.id;}catch(e){return false;}\n    });\n    if(!alreadyIn) s.appendRow([JSON.stringify(d.entry)]);\n  }\n\n  return ContentService.createTextOutput(JSON.stringify({ok:true}))\n    .setMimeType(ContentService.MimeType.JSON);\n}\nfunction json(o){\n  return ContentService.createTextOutput(JSON.stringify(o))\n    .setMimeType(ContentService.MimeType.JSON);\n}";
+// Bloc à ajouter dans doGet de l'ancien Apps Script (uniquement pour migrer la feuille Scieur)
+const APPS_SCRIPT_TEXT = "  if(action === \"getScieur\") {\n    var sheet = ss.getSheetByName(\"Scieur\");\n    if(!sheet||sheet.getLastRow()<2) return json({scieur:[]});\n    var rows = sheet.getRange(2,1,sheet.getLastRow()-1,Math.max(16,sheet.getLastColumn())).getDisplayValues();\n    return json({scieur:rows});\n  }\n";
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App(){
   const [tab,setTab]=useState("commande");
-  const [scriptUrl,setScriptUrl]=useState(()=>localStorage.getItem(APPS_SCRIPT_URL_KEY)||"");
+  // ── Connexion Supabase ──
+  const [session,setSession]=useState(null);
+  const [authReady,setAuthReady]=useState(false);
+  const [authErr,setAuthErr]=useState("");
+  const scriptUrl=session?"supabase":""; // conservé pour compatibilité avec le reste du code
+  useEffect(()=>{
+    let alive=true, sub=null;
+    getSupabase().then(sb=>{
+      sb.auth.getSession().then(({data})=>{ if(alive){ setSession(data.session||null); setAuthReady(true); } });
+      const r=sb.auth.onAuthStateChange((_evt,s)=>{ if(alive) setSession(s||null); });
+      sub=r.data.subscription;
+    }).catch(e=>{ if(alive){ setAuthErr(e.message); setAuthReady(true); } });
+    return ()=>{ alive=false; if(sub) sub.unsubscribe(); };
+  },[]);
+  const deconnexion=async()=>{ try{ const sb=await getSupabase(); await sb.auth.signOut(); }catch(e){} };
+
+  // ── Migration depuis l'ancien Google Sheet ──
+  const [oldUrl,setOldUrl]=useState(()=>localStorage.getItem(APPS_SCRIPT_URL_KEY)||"");
+  const [migrating,setMigrating]=useState(false);
+  const [migLog,setMigLog]=useState([]);
   const [toast,setToast]=useState(null);
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
@@ -1244,14 +1370,9 @@ export default function App(){
     if(!scriptUrl)return;
     if(!silent){setLoading(true);setLoadError(null);}
     try{
-      const r=await fetch(`${scriptUrl}?action=getCommandes&t=${Date.now()}`);
-      const text=await r.text();
-      let d;
-      try{ d=JSON.parse(text); }catch(e){ setLoadError("Réponse invalide: "+text.slice(0,100)); return; }
-      if(d.error){ setLoadError("Erreur Apps Script: "+d.error); return; }
-      if(d.commandes)setCmd(d.commandes);
-      else setLoadError("Pas de commandes dans la réponse");
-    }catch(e){ setLoadError("Erreur réseau: "+e.message); }
+      const cmds=await fetchCommandes();
+      setCmd(cmds);
+    }catch(e){ setLoadError("Erreur base de données: "+e.message); }
     if(!silent)setLoading(false);
   },[scriptUrl]);
 
@@ -1260,14 +1381,55 @@ export default function App(){
     if(!scriptUrl)return;
     setHistLoading(true);
     try{
-      const r=await fetch(`${scriptUrl}?action=getHistorique&t=${Date.now()}`);
-      const d=await r.json();
-      if(d.historique)setHistCmds(d.historique);
+      const h=await fetchHistorique();
+      setHistCmds(h);
     }catch(e){}
     setHistLoading(false);
   },[scriptUrl]);
 
   useEffect(()=>{ load(); poll.current=setInterval(()=>load(true),30000); return()=>clearInterval(poll.current); },[load]);
+
+  const migrer=async()=>{
+    const url=oldUrl.trim();
+    if(!url){ showToast("Colle l'URL de l'ancien Apps Script","error"); return; }
+    setMigrating(true);
+    const logs=[]; const log=m=>{ logs.push(m); setMigLog([...logs]); };
+    try{
+      const sb=await getSupabase();
+      log("Lecture des commandes du Sheet…");
+      const d1=await (await fetch(`${url}?action=getCommandes&t=${Date.now()}`)).json();
+      const cmds=dedupe((d1.commandes||[]).filter(c=>c&&c.id).map(c=>({
+        id:String(c.id).trim(), client:sbStr(c.client), chantier:sbStr(c.chantier),
+        date_livraison:sbStr(c.dateLivraison), notes:sbStr(c.notes), statut:c.statut||"attente",
+        date_creation:sbStr(c.dateCreation), adresse_client:sbStr(c.adresseClient), adresse_livraison:sbStr(c.adresseLivraison),
+        remise:sbStr(c.remise), livraison_type:sbStr(c.livraisonType), livraison_val:sbStr(c.livraisonVal),
+        lignes:c.lignes||[]
+      })),"id");
+      await insertChunks(sb,"commandes",cmds,"id");
+      log(`✓ ${cmds.length} commande(s) importée(s)`);
+
+      log("Lecture de l'historique…");
+      const d2=await (await fetch(`${url}?action=getHistorique&t=${Date.now()}`)).json();
+      const hist=dedupe((d2.historique||[]).filter(e=>e&&e.id).map(e=>({id:String(e.id),data:e})),"id");
+      await insertChunks(sb,"historique",hist,"id");
+      log(`✓ ${hist.length} entrée(s) d'historique importée(s)`);
+
+      log("Lecture de la feuille Scieur…");
+      let d3=null;
+      try{ d3=await (await fetch(`${url}?action=getScieur&t=${Date.now()}`)).json(); }catch(e){ d3=null; }
+      if(d3&&Array.isArray(d3.scieur)){
+        const sc=dedupe(d3.scieur.filter(r=>r&&r.some(v=>String(v).trim()!=="")).map((r,i)=>scieurRow(r,String(r[2]||"").trim()||`MIGR-${i+1}`)),"cle");
+        await insertChunks(sb,"scieur",sc,"cle");
+        log(`✓ ${sc.length} ligne(s) Scieur importée(s)`);
+      } else {
+        log("⚠ Feuille Scieur non importée : ajoute le bloc getScieur dans l'Apps Script (voir ci-dessous), fais un nouveau déploiement, puis relance.");
+      }
+      log("Migration terminée ✓ (tu peux la relancer sans créer de doublons)");
+      showToast("Migration terminée ✓");
+    }catch(e){ log("✗ Erreur : "+e.message); showToast("Erreur de migration","error"); }
+    setMigrating(false);
+    load(true); loadHist();
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // ONGLET 1 — COMMANDE
@@ -1291,7 +1453,7 @@ export default function App(){
   const formValid=form.client&&form.lignes.every(l=>l.produit&&l.essence&&l.quantite);
 
   const envoyer=async()=>{
-    if(!formValid||!scriptUrl){if(!scriptUrl)showToast("URL Apps Script manquante","error");return;}
+    if(!formValid||!scriptUrl){if(!scriptUrl)showToast("Non connecté à la base","error");return;}
     setSub(true);
     // Si édition : conserver le même id, supprimer l'ancienne commande d'abord
     const id = editCmd || genId();
@@ -1302,7 +1464,7 @@ export default function App(){
     const rows=form.lignes.map((l,i)=>[
       i===0?id:"", form.client, l.produit, l.essence, l.qualite,
       l.epaisseur, l.largeur, l.longueur, l.quantite,
-      form.dateLivraison, i===0?form.notes:"", "devis_envoye", i===0?dc:"",
+      form.dateLivraison, i===0?form.notes:"", "attente", i===0?dc:"",
       prodId(id,i), l.unite||"m³",
       l.prixUnitaire||"",
       l.typePrix||l.unite||"m³",
@@ -1330,13 +1492,6 @@ export default function App(){
     setCmd(c=>c.filter(x=>x.id!==id));
     setConfirmDel(null); setDeleting(false);
     showToast("Commande supprimée");
-  };
-
-  const accepterDevis=async(id)=>{
-    if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
-    try{await callScript(scriptUrl,{type:"updateStatut",id,statut:"attente"});}catch(e){}
-    setCmd(c=>c.map(x=>x.id===id?{...x,statut:"attente"}:x));
-    showToast("Devis accepté ✓ — commande en attente");
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1387,7 +1542,7 @@ export default function App(){
   };
 
   const validerProduit=async(cmd,pid)=>{
-    if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
+    if(!scriptUrl){showToast("Non connecté à la base","error");return;}
     const p=cubeRef.current[cmd.id]?.[pid];
     if(!p||!isPret(p))return;
 
@@ -1506,7 +1661,7 @@ export default function App(){
     setFreeSub(false);
   };
   const exportFree=async(e)=>{
-    if(!scriptUrl){showToast("URL Apps Script manquante","error");return;}
+    if(!scriptUrl){showToast("Non connecté à la base","error");return;}
     if(exportedSet.has(String(e.id))){showToast("Déjà exporté !","warn");return;}
     setFreeExp(x=>({...x,[e.id]:true}));
     const row=[e.date,"","",e.produit,e.essence,e.qualite,e.epaisseur,e.largeur,e.longueur,e.nbUnites,e.volumeGrume,e.volumeUnit,e.volumeCharge,e.rendement,e.perte,"m³"];
@@ -1520,7 +1675,6 @@ export default function App(){
   };
 
   const cmdBrouillon=commandes.filter(c=>c.statut==="brouillon");
-  const cmdDevisEnvoye=commandes.filter(c=>c.statut==="devis_envoye");
   const cmdAtt=commandes.filter(c=>["attente","En attente"].includes(c.statut));
   const cmdProd=commandes.filter(c=>["production","En production"].includes(c.statut));
   const cmdVal=commandes.filter(c=>["valide","Validée"].includes(c.statut));
@@ -1529,6 +1683,9 @@ export default function App(){
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDU
   // ─────────────────────────────────────────────────────────────────────────────
+  if(!authReady) return <div style={{...S.root,alignItems:"center",justifyContent:"center",color:"#8A9BB0",fontSize:13}}>Chargement…</div>;
+  if(!session) return <LoginScreen initialError={authErr}/>;
+
   return (
     <div style={S.root}>
       <Toast t={toast}/>
@@ -1660,7 +1817,7 @@ export default function App(){
               </Field>
               <Row2 style={{marginBottom:10}}>
                 <Field label="Produit"><SelProduit value={lg.produit} onChange={sl(i,"produit")} opts={PRODUITS}/></Field>
-                <Field label="Essence"><SelEssence value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
+                <Field label="Essence"><Sel value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
               </Row2>
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
@@ -1953,7 +2110,7 @@ export default function App(){
             <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0"}}>Commandes</div>
             <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
           </div>
-          {!scriptUrl&&<div style={{textAlign:"center",padding:12,color:"#FF9F0A",fontSize:12}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {!scriptUrl&&<div style={{textAlign:"center",padding:12,color:"#FF9F0A",fontSize:12}}>⚠ Non connecté à la base de données</div>}
           {scriptUrl&&commandes.length===0&&!loading&&<div style={{textAlign:"center",padding:12,color:"#4A5568",fontSize:12}}>Aucune commande — appuie sur ↻ pour charger</div>}
           {loadError&&<div style={{background:"rgba(255,69,58,.08)",border:"1px solid rgba(255,69,58,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8,fontSize:11,color:"#FF453A"}}>
             ⚠ {loadError}
@@ -2009,7 +2166,7 @@ export default function App(){
                 </Card>
               ))}
             </>}
-            {(cmdDevisEnvoye.length>0||cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
+            {(cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
             {commandes.filter(c=>c.statut!=='brouillon').map(c=>(
               <Card key={c.id}>
                 {confirmDel===c.id?(
@@ -2035,14 +2192,6 @@ export default function App(){
                       </div>
                     ))}
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6,marginBottom:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500,fontSize:13}}>{(d=>d?new Date(d).toLocaleDateString('fr-FR'):"—")(c.dateLivraison||c.datelivraison)}</strong></div>
-                    {c.statut==="devis_envoye"&&
-                      <div style={{display:"flex",gap:6,marginBottom:8}}>
-                        <button style={{...S.btnBig,margin:0,flex:1,fontSize:12,padding:"8px 8px",background:"rgba(52,199,89,.1)",color:"#34C759",border:"1px solid rgba(52,199,89,.35)"}}
-                          onClick={()=>accepterDevis(c.id)}>✓ Devis accepté</button>
-                        <button style={{...S.btnBig,margin:0,flex:1,fontSize:12,padding:"8px 8px",background:"rgba(255,69,58,.08)",color:"#FF453A",border:"1px solid rgba(255,69,58,.3)"}}
-                          onClick={()=>setConfirmDel(c.id)}>✗ Refusé</button>
-                      </div>
-                    }
                     <div style={{display:"flex",gap:6}}>
                       <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center"}}
                         onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
@@ -2093,7 +2242,7 @@ export default function App(){
             <Stat label="Validées" value={cmdVal.length} color="#6dbf7e"/>
           </div>
           <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
-          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Non connecté à la base de données</div>}
           {aRealiser.length===0&&scriptUrl&&!loading&&<Empty icon="✅" text="Aucune commande à réaliser"/>}
 
           {aRealiser.map(cmd=>{
@@ -2317,7 +2466,7 @@ export default function App(){
             <div style={{color:"#8A9BB0",fontSize:12}}>{histCmds.length} commande{histCmds.length>1?"s":""} réalisée{histCmds.length>1?"s":""}</div>
             <button style={S.btnRefresh} onClick={loadHist}>{histLoading?"⏳":"↻ Actualiser"}</button>
           </div>
-          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Configure l'URL Apps Script dans ⚙ Config</div>}
+          {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Non connecté à la base de données</div>}
           {histCmds.length===0&&!histLoading&&scriptUrl&&<Empty icon="📚" text="Aucune commande validée — appuie sur ↻ pour charger"/>}
           {histLoading&&<Empty icon="⏳" text="Chargement..."/>}
 
@@ -2371,7 +2520,7 @@ export default function App(){
             </Field>
             <Row2 style={{marginBottom:12}}>
               <Field label="Produit"><SelProduit value={freeForm.produit} onChange={sfree("produit")} opts={PRODUITS}/></Field>
-              <Field label="Essence"><SelEssence value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
+              <Field label="Essence"><Sel value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
             </Row2>
             <Field label="Qualité"><Sel value={freeForm.qualite} onChange={sfree("qualite")} opts={QUALITES}/></Field>
           </Card>
@@ -2456,23 +2605,23 @@ export default function App(){
 
         {/* ══ CONFIG ══ */}
         {tab==="config"&&<div style={S.page}>
-          <Card title="Apps Script Web App">
-            <p style={{fontSize:13,color:"#a09080",lineHeight:1.7,marginBottom:14}}>Colle l'URL de ton Apps Script déployée.</p>
-            <Field label="URL Apps Script">
-              <Inp value={scriptUrl} onChange={e=>{setScriptUrl(e.target.value);localStorage.setItem(APPS_SCRIPT_URL_KEY,e.target.value);}} ph="https://script.google.com/macros/s/..."/>
+          <Card title="Base de données Supabase">
+            <div style={{fontSize:13,color:"#E8ECEF",marginBottom:6}}>✓ Connecté : <strong style={{color:"#34C759"}}>{session.user?.email}</strong></div>
+            <div style={{fontSize:12,color:"#8A9BB0",lineHeight:1.6,marginBottom:12}}>Les commandes, cubages et l'historique sont enregistrés dans Supabase et partagés entre tous les comptes de l'équipe.</div>
+            <button style={S.btnSmall} onClick={deconnexion}>Se déconnecter</button>
+          </Card>
+          <Card title="Migration depuis l'ancien Google Sheet">
+            <p style={{fontSize:13,color:"#a09080",lineHeight:1.7,marginBottom:14}}>À faire une seule fois : copie toutes les commandes, l'historique et les cubages du Sheet vers Supabase. Relançable sans doublons.</p>
+            <Field label="URL de l'ancien Apps Script">
+              <Inp value={oldUrl} onChange={e=>setOldUrl(e.target.value)} ph="https://script.google.com/macros/s/..."/>
             </Field>
-            {scriptUrl&&<div style={{fontSize:12,color:"#6dbf7e",marginTop:8}}>✓ URL enregistrée</div>}
+            <button style={{...S.btnBig,marginTop:12,marginBottom:0,...(migrating?S.btnDis:{})}} disabled={migrating} onClick={migrer}>{migrating?"Migration en cours…":"⇪ Importer les données du Sheet"}</button>
+            {migLog.length>0&&<div style={{marginTop:12,fontSize:12,lineHeight:1.8,color:"#8A9BB0"}}>{migLog.map((m,i)=><div key={i}>{m}</div>)}</div>}
           </Card>
-          <Card title="Script Apps Script — Version complète">
-            <pre style={S.pre}>{APPS_SCRIPT_TEXT.replace(/\\n/g,"\n")}</pre>
+          <Card title="Bloc à ajouter dans l'Apps Script (feuille Scieur)">
+            <p style={{fontSize:12,color:"#8A9BB0",lineHeight:1.7}}>Colle ce bloc dans la fonction doGet, juste avant la ligne <code>return json({"{"}ok:true{"}"});</code>, puis fais un Nouveau déploiement.</p>
+            <pre style={S.pre}>{APPS_SCRIPT_TEXT}</pre>
           </Card>
-          <div style={{background:"#1A1D20",border:"1px solid rgba(255,255,255,.07)",borderRadius:8,padding:14,fontSize:12,color:"#8A9BB0",lineHeight:1.9}}>
-            <strong style={{color:"#34C759",display:"block",marginBottom:6}}>⚠ Nouveau déploiement requis</strong>
-            Extensions → Apps Script → remplace tout → <strong style={{color:"#34C759"}}>Nouveau déploiement</strong> → App Web → Tout le monde → Déployer → copier l'URL.<br/>
-            <strong style={{color:"#34C759",display:"block",margin:"8px 0 4px"}}>Nouvel onglet Sheet :</strong>
-            • <strong>Historique</strong> — 1 ligne par commande validée (JSON) · commun à tous les appareils<br/>
-            • <strong>Scieur</strong> — ajoute la colonne "Unité" en fin de ligne
-          </div>
         </div>}
 
       </main>
