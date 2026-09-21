@@ -12,7 +12,7 @@ const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
-const initCmd   = { client:"",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
+const initCmd   = { client:"",chantier:"",devisStatut:"en_attente",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ async function imprimerCommande(cmd){
   doc.setFont("helvetica","normal");
   doc.setFontSize(9);
   doc.setTextColor(...NOIR);
-  doc.text(`Client : ${cmd.client||"—"}`,18,y+15);
+  doc.text(`Client : ${cmd.client||"—"}${cmd.chantier?"  ·  Chantier : "+cmd.chantier:""}`,18,y+15);
   if(cmd.dateLivraison){
     doc.setFont("helvetica","bold");
     doc.setTextColor(...VERT);
@@ -506,6 +506,10 @@ async function genererDevisPDF(form, cmdId){
   doc.setTextColor(OR_R, OR_G, OR_B);
   doc.text(form.client||"—", 112, 47);
   let yc = 52;
+  if(form.chantier){
+    doc.setFont("helvetica","italic"); doc.setFontSize(8.5); doc.setTextColor(60,60,60);
+    doc.text(`Chantier : ${form.chantier}`, 112, yc); yc+=5;
+  }
   doc.setFont("helvetica","normal");
   doc.setFontSize(8);
   doc.setTextColor(...NOIR);
@@ -852,6 +856,10 @@ async function genererFacturePDF(form, cmdId){
   doc.setTextColor(...ORANGE);
   doc.text(form.client||"—",110,47);
   let yc=52;
+  if(form.chantier){
+    doc.setFont("helvetica","italic"); doc.setFontSize(8.5); doc.setTextColor(60,60,60);
+    doc.text(`Chantier : ${form.chantier}`,110,yc); yc+=5;
+  }
   doc.setFont("helvetica","normal");
   doc.setFontSize(8);
   doc.setTextColor(...NOIR);
@@ -1104,7 +1112,7 @@ function getSupabase(){
 }
 const sbStr=v=>(v===null||v===undefined)?"":String(v);
 const sbNum=v=>{ const t=sbStr(v).trim(); if(!t||t==="0")return ""; const n=parseFloat(t.replace(",",".")); return (!isNaN(n)&&n>0)?String(n):""; };
-const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier"];
+const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut"];
 const SCIEUR_COLS=["date","cmd_id","prod_id","produit","essence","qualite","epaisseur","largeur","longueur","nb_unites","vol_grume","vol_unitaire","vol_charge","vol_reel","rendement","perte","unite"];
 // Lignes "Sheet" (tableaux positionnels) → 1 enregistrement commande
 function rowsToCommande(rows,id){
@@ -1115,6 +1123,7 @@ function rowsToCommande(rows,id){
     date_livraison:h.dateLivraison||"", notes:h.notes||"", statut:h.statut||"attente",
     date_creation:h.dateCreation||"", adresse_client:h.adresseClient||"", adresse_livraison:h.adresseLivraison||"",
     remise:h.remise||"", livraison_type:h.livraisonType||"", livraison_val:h.livraisonVal||"",
+    devis_statut:h.devisStatut||"en_attente",
     lignes:objs.map(o=>({ produit:o.produit, essence:o.essence, qualite:o.qualite,
       epaisseur:o.epaisseur, largeur:o.largeur, longueur:o.longueur, quantite:o.quantite,
       prodId:o.prodId, unite:o.unite||"m³", prixUnitaire:o.prixUnitaire,
@@ -1128,6 +1137,7 @@ function commandeToApp(c){
     dateLivraison:sbStr(c.date_livraison), notes:sbStr(c.notes), statut:c.statut||"attente",
     dateCreation:sbStr(c.date_creation), adresseClient:sbStr(c.adresse_client), adresseLivraison:sbStr(c.adresse_livraison),
     remise:sbStr(c.remise), livraisonType:sbStr(c.livraison_type), livraisonVal:sbStr(c.livraison_val),
+    devisStatut:c.devis_statut||"accepte", // anciennes commandes (avant l'option) = considérées acceptées
     lignes:(c.lignes||[]).map(l=>({ ...l,
       produit:sbStr(l.produit), essence:sbStr(l.essence), qualite:sbStr(l.qualite),
       epaisseur:sbStr(l.epaisseur), largeur:sbStr(l.largeur),
@@ -1150,7 +1160,7 @@ async function fetchCommandes(){
 }
 async function fetchHistorique(){
   const sb=await getSupabase();
-  const {data,error}=await sb.from("historique").select("data").order("seq",{ascending:true});
+  const {data,error}=await sb.from("historique").select("data").order("seq",{ascending:false});
   if(error) throw new Error(error.message);
   return (data||[]).map(r=>r.data).filter(Boolean);
 }
@@ -1170,6 +1180,8 @@ async function callScript(_url, body){
     res=await sb.from("commandes").upsert(rowsToCommande(body.rows,body.id),{onConflict:"id",ignoreDuplicates:true});
   } else if(body.type==="updateStatut"){
     res=await sb.from("commandes").update({statut:body.statut}).eq("id",String(body.id));
+  } else if(body.type==="updateDevis"){
+    res=await sb.from("commandes").update({devis_statut:body.devisStatut}).eq("id",String(body.id));
   } else if(body.type==="deleteCommande"){
     res=await sb.from("commandes").delete().eq("id",String(body.id));
   } else if(body.type==="cubageProduit"){
@@ -1353,6 +1365,9 @@ export default function App(){
   const [histCmds,setHistCmds]=useState([]);
   const [histLoading,setHistLoading]=useState(false);
   const [histDetail,setHistDetail]=useState(null); // commande ouverte en détail
+  const [histSearch,setHistSearch]=useState("");
+  const [histLimit,setHistLimit]=useState(20);
+  const [showRefus,setShowRefus]=useState(false);
 
   // ── Cubage libre ──
   const [freeForm,setFree]=useState(initCube);
@@ -1403,7 +1418,7 @@ export default function App(){
         date_livraison:sbStr(c.dateLivraison), notes:sbStr(c.notes), statut:c.statut||"attente",
         date_creation:sbStr(c.dateCreation), adresse_client:sbStr(c.adresseClient), adresse_livraison:sbStr(c.adresseLivraison),
         remise:sbStr(c.remise), livraison_type:sbStr(c.livraisonType), livraison_val:sbStr(c.livraisonVal),
-        lignes:c.lignes||[]
+        devis_statut:"accepte", lignes:c.lignes||[]
       })),"id");
       await insertChunks(sb,"commandes",cmds,"id");
       log(`✓ ${cmds.length} commande(s) importée(s)`);
@@ -1473,7 +1488,9 @@ export default function App(){
       i===0?form.adresseLivraison||"":"",
       i===0?form.remise||"":"",
       i===0?form.livraisonType||"":"",
-      i===0?form.livraisonVal||"":""
+      i===0?form.livraisonVal||"":"",
+      i===0?form.chantier||"":"",
+      i===0?(form.devisStatut||"en_attente"):""
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1574,7 +1591,7 @@ export default function App(){
 
         // Sauvegarder historique dans le Sheet (commun)
         const hEntry={
-          id:cmd.id, client:cmd.client,
+          id:cmd.id, client:cmd.client, chantier:cmd.chantier||"",
           dateLivraison:cmd.dateLivraison||cmd.datelivraison,
           dateValidation:date, notes:cmd.notes||"",
           lignes:Object.values(updatedCmd).sort((a,b)=>a.idx-b.idx).map(p2=>({
@@ -1678,7 +1695,18 @@ export default function App(){
   const cmdAtt=commandes.filter(c=>["attente","En attente"].includes(c.statut));
   const cmdProd=commandes.filter(c=>["production","En production"].includes(c.statut));
   const cmdVal=commandes.filter(c=>["valide","Validée"].includes(c.statut));
-  const aRealiser=[...cmdAtt,...cmdProd]; // brouillon exclu volontairement
+  const aRealiser=[...cmdAtt,...cmdProd].filter(c=>c.devisStatut==="accepte"); // seulement les devis acceptés
+  const cmdActives=commandes.filter(c=>c.statut!=="brouillon"&&!["valide","Validée"].includes(c.statut)&&c.devisStatut!=="refuse");
+  const cmdRefusees=commandes.filter(c=>c.statut!=="brouillon"&&!["valide","Validée"].includes(c.statut)&&c.devisStatut==="refuse");
+  const setDevisStatut=async(id,statut)=>{
+    setCmd(cs=>cs.map(c=>c.id===id?{...c,devisStatut:statut}:c));
+    try{
+      await callScript(scriptUrl,{type:"updateDevis",id,devisStatut:statut});
+      showToast(statut==="accepte"?"Devis accepté ✓ — transmis au scieur":statut==="refuse"?"Devis refusé":"Devis remis en attente",statut==="refuse"?"warn":"success");
+    }catch(e){ showToast("Erreur : "+e.message,"error"); load(true); }
+  };
+  const histQ=histSearch.trim().toLowerCase();
+  const histFiltre=histQ?histCmds.filter(h=>[h.id,h.client,h.chantier,h.notes].some(v=>String(v||"").toLowerCase().includes(histQ))):histCmds;
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDU
@@ -1721,9 +1749,14 @@ export default function App(){
             </div>
           }
           <Card title="Informations commande">
-            <Field label="Client / chantier" style={{marginBottom:12}}>
-              <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont - Chalet Megève"/>
-            </Field>
+            <Row2 style={{marginBottom:12}}>
+              <Field label="Client *">
+                <Inp value={form.client} onChange={sf("client")} ph="Ex: Dupont"/>
+              </Field>
+              <Field label="Chantier / Référence">
+                <Inp value={form.chantier||""} onChange={sf("chantier")} ph="Ex: Chalet Megève"/>
+              </Field>
+            </Row2>
             <Field label="Date de livraison souhaitée" style={{marginBottom:12}}>
               <Inp type="date" value={form.dateLivraison} onChange={sf("dateLivraison")} min={today()}/>
             </Field>
@@ -2082,7 +2115,9 @@ export default function App(){
                     i===0?form.adresseClient||"":"", i===0?form.adresseLivraison||"":"",
                     i===0?form.remise||"":"",
                     i===0?form.livraisonType||"":"",
-                    i===0?form.livraisonVal||"":""
+                    i===0?form.livraisonVal||"":"",
+                    i===0?form.chantier||"":"",
+                    i===0?(form.devisStatut||"en_attente"):""
                   ]);
                   try{
                     await callScript(scriptUrl,{type:"commande",rows,id:bid});
@@ -2144,8 +2179,9 @@ export default function App(){
                       <button style={{...S.btnBig,marginBottom:0,background:"rgba(155,89,247,.1)",color:"#9B59F7",border:"1px solid rgba(155,89,247,.3)",fontSize:13}}
                         onClick={()=>{
                           setForm({
-                            client:c.client||"",dateLivraison:c.dateLivraison||c.datelivraison||"",
+                            client:c.client||"",chantier:c.chantier||"",devisStatut:"en_attente",dateLivraison:c.dateLivraison||c.datelivraison||"",
                             notes:c.notes||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",remise:c.remise||"",
+                            livraisonType:c.livraisonType||"",livraisonVal:c.livraisonVal||"",
                             lignes:(c.lignes||[]).map(l=>({
                               produit:l.produit||"",essence:l.essence||"",qualite:l.qualite||"",
                               epaisseur:l.epaisseur||"",largeur:l.largeur||"",
@@ -2166,8 +2202,8 @@ export default function App(){
                 </Card>
               ))}
             </>}
-            {(cmdAtt.length>0||cmdProd.length>0||cmdVal.length>0)&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
-            {commandes.filter(c=>c.statut!=='brouillon').map(c=>(
+            {cmdActives.length>0&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
+            {cmdActives.map(c=>(
               <Card key={c.id}>
                 {confirmDel===c.id?(
                   <div style={{textAlign:"center",padding:"8px 0"}}>
@@ -2180,7 +2216,7 @@ export default function App(){
                 ):(
                   <>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                      <div><div style={{fontSize:11,color:"#8A9BB0",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}</div></div>
+                      <div><div style={{fontSize:11,color:"#8A9BB0",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}</div>{c.chantier&&<div style={{fontSize:12,color:"#8A9BB0",fontStyle:"italic"}}>🏗 {c.chantier}</div>}</div>
                       <div style={{display:"flex",alignItems:"center",gap:8}}><Badge status={c.statut||"attente"}/><button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button></div>
                     </div>
                     {(c.lignes||[]).map((l,i)=>(
@@ -2192,6 +2228,20 @@ export default function App(){
                       </div>
                     ))}
                     <div style={{fontSize:12,color:"#8A9BB0",marginTop:6,marginBottom:6}}>Livraison : <strong style={{color:"#E8ECEF",fontWeight:500,fontSize:13}}>{(d=>d?new Date(d).toLocaleDateString('fr-FR'):"—")(c.dateLivraison||c.datelivraison)}</strong></div>
+                    {c.devisStatut==="accepte"?(
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,background:"rgba(52,199,89,.08)",border:"1px solid rgba(52,199,89,.25)",borderRadius:8,padding:"7px 10px",marginBottom:8}}>
+                        <span style={{fontSize:12,color:"#34C759",fontWeight:600}}>✓ Devis accepté</span>
+                        {["attente","En attente"].includes(c.statut||"attente")&&<button style={{...S.btnSmall,fontSize:11,padding:"4px 8px"}} onClick={()=>setDevisStatut(c.id,"en_attente")}>Annuler</button>}
+                      </div>
+                    ):(
+                      <div style={{background:"rgba(255,159,10,.07)",border:"1px solid rgba(255,159,10,.25)",borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                        <div style={{fontSize:12,color:"#FF9F0A",fontWeight:600,marginBottom:6}}>⏳ Devis en attente de réponse</div>
+                        <div style={{display:"flex",gap:6}}>
+                          <button style={{...S.btnExport,flex:1,fontSize:12,padding:"7px"}} onClick={()=>setDevisStatut(c.id,"accepte")}>✓ Accepté</button>
+                          <button style={{...S.btnDel,flex:1,fontSize:12,padding:"7px"}} onClick={()=>setDevisStatut(c.id,"refuse")}>✕ Refusé</button>
+                        </div>
+                      </div>
+                    )}
                     <div style={{display:"flex",gap:6}}>
                       <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center"}}
                         onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
@@ -2203,6 +2253,8 @@ export default function App(){
                             // Charger la commande dans le formulaire pour édition
                             setForm({
                               client:c.client||"",
+                              chantier:c.chantier||"",
+                              devisStatut:c.devisStatut||"en_attente",
                               dateLivraison:c.dateLivraison||c.datelivraison||"",
                               notes:c.notes||"",
                               adresseClient:c.adresseClient||"",
@@ -2231,6 +2283,33 @@ export default function App(){
                 )}
               </Card>
             ))}
+            {cmdVal.length>0&&<div style={{fontSize:12,color:"#8A9BB0",textAlign:"center",margin:"12px 0",cursor:"pointer"}} onClick={()=>{setTab("historique");if(histCmds.length===0)loadHist();}}>✓ {cmdVal.length} commande{cmdVal.length>1?"s":""} terminée{cmdVal.length>1?"s":""} — <span style={{color:"#34C759",textDecoration:"underline"}}>voir l'Historique</span></div>}
+            {cmdRefusees.length>0&&<>
+              <button style={{...S.btnRefresh,width:"100%",marginTop:8}} onClick={()=>setShowRefus(v=>!v)}>{showRefus?"▾":"▸"} Devis refusés ({cmdRefusees.length})</button>
+              {showRefus&&cmdRefusees.map(c=>(
+                <Card key={c.id} style={{opacity:.75,marginTop:8}}>
+                  {confirmDel===c.id?(
+                    <div style={{textAlign:"center",padding:"8px 0"}}>
+                      <div style={{color:"#e07a5f",fontSize:13,marginBottom:12}}>Supprimer <strong>{c.id}</strong> ?</div>
+                      <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+                        <button style={{...S.btnSmall,color:"#e07a5f",borderColor:"rgba(224,122,95,.4)"}} onClick={()=>supprimerCommande(c.id)} disabled={deleting}>{deleting?<Spinner/>:"Confirmer"}</button>
+                        <button style={S.btnSmall} onClick={()=>setConfirmDel(null)}>Annuler</button>
+                      </div>
+                    </div>
+                  ):(<>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                      <div><div style={{fontSize:11,color:"#8A9BB0"}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF"}}>{c.client}</div>{c.chantier&&<div style={{fontSize:12,color:"#8A9BB0",fontStyle:"italic"}}>🏗 {c.chantier}</div>}</div>
+                      <span style={{fontSize:11,color:"#FF453A",fontWeight:600}}>✕ Refusé</span>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button style={{...S.btnSmall,flex:1,fontSize:11}} onClick={()=>setDevisStatut(c.id,"en_attente")}>↺ Remettre en attente</button>
+                      <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px"}} onClick={()=>genererDevisPDF({...c},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
+                      <button style={{...S.btnDel,padding:"4px 10px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button>
+                    </div>
+                  </>)}
+                </Card>
+              ))}
+            </>}
           </>}
         </div>}
 
@@ -2366,17 +2445,7 @@ export default function App(){
             );
           })}
 
-          {cmdVal.length>0&&<>
-            <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#34C759",marginTop:20,marginBottom:8,paddingBottom:5,borderBottom:"1px solid rgba(52,199,89,.15)"}}>Validées récentes</div>
-            {cmdVal.map(cmd=>(
-              <div key={cmd.id} style={{...S.card,borderColor:"rgba(109,191,126,.15)",opacity:0.7}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div><div style={{fontSize:11,color:"#0A84FF",fontWeight:500}}>{cmd.id}</div><div style={{fontWeight:700,color:"#E8ECEF"}}>{cmd.client}</div></div>
-                  <Badge status="valide"/>
-                </div>
-              </div>
-            ))}
-          </>}
+          {cmdActives.some(c=>c.devisStatut!=="accepte")&&<div style={{fontSize:12,color:"#8A9BB0",textAlign:"center",marginTop:12}}>⏳ {cmdActives.filter(c=>c.devisStatut!=="accepte").length} devis en attente d'acceptation (non affichés ici)</div>}
         </div>}
 
         {/* ══ HISTORIQUE COMMUN ══ */}
@@ -2389,6 +2458,7 @@ export default function App(){
                   <div>
                     <div style={{fontSize:11,color:"#5bb8d4"}}>{histDetail.id}</div>
                     <div style={{fontWeight:700,color:"#E8ECEF",fontSize:18}}>{histDetail.type==="libre"?"📐 Cubage libre":histDetail.client}</div>
+                    {histDetail.type!=="libre"&&(histDetail.chantier||(commandes.find(c=>c.id===histDetail.id)||{}).chantier)&&<div style={{fontSize:13,color:"#8A9BB0",fontStyle:"italic"}}>🏗 {histDetail.chantier||(commandes.find(c=>c.id===histDetail.id)||{}).chantier}</div>}
                   </div>
                   <button style={{...S.btnSmall,fontSize:16,padding:"6px 14px"}} onClick={()=>setHistDetail(null)}>✕</button>
                 </div>
@@ -2434,28 +2504,25 @@ export default function App(){
                   );
                 })}
                 <div style={{display:"flex",gap:10,marginTop:8}}>
-                  {histDetail.type!=="libre"&&
-                    <button style={{...S.btnBig,marginBottom:0,flex:1}}
-                      onClick={()=>genererDevisPDF({
-                        client:histDetail.client,
-                        dateLivraison:histDetail.dateLivraison,
-                        notes:histDetail.notes||"",
-                        adresseClient:histDetail.adresseClient||"",
-                        adresseLivraison:histDetail.adresseLivraison||"",
-                        remise:histDetail.remise||"",
-                        livraisonType:histDetail.livraisonType||"",
-                        livraisonVal:histDetail.livraisonVal||"",
-                        lignes:(histDetail.lignes||[]).map(l=>({
-                          produit:l.produit, essence:l.essence, qualite:l.qualite,
-                          epaisseur:l.epaisseur, largeur:l.largeur, longueur:l.longueur,
-                          quantite:l.nbUnites||l.quantite||l.volCharge,
-                          unite:l.unite||"m³", prixUnitaire:l.prixUnitaire||"",
-                          typePrix:l.typePrix||l.unite||"m³", typeTaxe:l.typeTaxe||"HT"
-                        }))
-                      }, histDetail.id).catch(e=>alert("Erreur PDF: "+e.message))}>
-                      📄 Télécharger le devis
-                    </button>
-                  }
+                  {histDetail.type!=="libre"&&(()=>{
+                    const orig=commandes.find(c=>c.id===histDetail.id);
+                    const data=orig?{...orig}:{
+                      client:histDetail.client, chantier:histDetail.chantier||"",
+                      dateLivraison:histDetail.dateLivraison, notes:histDetail.notes||"",
+                      adresseClient:"", adresseLivraison:"", remise:"", livraisonType:"", livraisonVal:"",
+                      lignes:(histDetail.lignes||[]).map(l=>({
+                        produit:l.produit, essence:l.essence, qualite:l.qualite,
+                        epaisseur:l.epaisseur, largeur:l.largeur, longueur:l.longueur,
+                        quantite:l.nbUnites||l.quantite||l.volCharge,
+                        unite:l.unite||"m³", prixUnitaire:l.prixUnitaire||"",
+                        typePrix:l.typePrix||l.unite||"m³", typeTaxe:l.typeTaxe||"HT"
+                      }))
+                    };
+                    return <>
+                      <button style={{...S.btnBig,marginBottom:0,flex:1}} onClick={()=>genererDevisPDF(data,histDetail.id).catch(e=>alert("Erreur PDF: "+e.message))}>📄 Devis</button>
+                      <button style={{...S.btnBig,marginBottom:0,flex:1,background:"#0A5FB8"}} onClick={()=>genererFacturePDF(data,histDetail.id).catch(e=>alert("Erreur Facture: "+e.message))}>🧾 Facture</button>
+                    </>;
+                  })()}
                   <button style={{...S.btnSmall,fontSize:14,padding:"12px 20px"}} onClick={()=>setHistDetail(null)}>✕ Fermer</button>
                 </div>
               </div>
@@ -2470,7 +2537,8 @@ export default function App(){
           {histCmds.length===0&&!histLoading&&scriptUrl&&<Empty icon="📚" text="Aucune commande validée — appuie sur ↻ pour charger"/>}
           {histLoading&&<Empty icon="⏳" text="Chargement..."/>}
 
-          {histCmds.map(h=>{
+          {histCmds.length>0&&<Inp value={histSearch} onChange={e=>{setHistSearch(e.target.value);setHistLimit(20);}} ph="🔍 Rechercher (client, chantier, n° commande…)" style={{marginBottom:12}}/>}
+          {histFiltre.slice(0,histLimit).map(h=>{
             const isLibre=h.type==="libre";
             const borderC=isLibre?"rgba(154,122,84,.35)":"rgba(109,191,126,.2)";
             const accentC=isLibre?"#9A7A54":"#6dbf7e";
@@ -2482,6 +2550,7 @@ export default function App(){
                 <div>
                   <div style={{fontSize:11,color:"#0A84FF",fontWeight:500}}>{h.id}</div>
                   <div style={{fontWeight:700,color:"#E8ECEF",fontSize:14}}>{isLibre?"Cubage libre":h.client}</div>
+                  {!isLibre&&(h.chantier||(commandes.find(c=>c.id===h.id)||{}).chantier)&&<div style={{fontSize:12,color:"#8A9BB0",fontStyle:"italic"}}>🏗 {h.chantier||(commandes.find(c=>c.id===h.id)||{}).chantier}</div>}
                 </div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
                   <span style={{fontSize:11,color:accentC,background:`rgba(${isLibre?"154,122,84":"109,191,126"},.1)`,padding:"3px 8px",borderRadius:12,border:`1px solid rgba(${isLibre?"154,122,84":"109,191,126"},.2)`}}>
@@ -2508,6 +2577,8 @@ export default function App(){
             </div>
             );
           })}
+          {histFiltre.length>histLimit&&<button style={{...S.btnRefresh,width:"100%"}} onClick={()=>setHistLimit(n=>n+20)}>Afficher plus ({histFiltre.length-histLimit} restantes)</button>}
+          {histQ&&histFiltre.length===0&&<Empty icon="🔍" text="Aucun résultat"/>}
         </div>}
 
         {/* ══ CUBAGE LIBRE ══ */}
