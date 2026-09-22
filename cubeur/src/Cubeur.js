@@ -1279,7 +1279,17 @@ function Row3({children}){ return <div style={{display:"grid",gridTemplateColumn
 function Sel({value,onChange,opts,ph="— choisir —"}){ return <select style={S.select} value={value} onChange={onChange}><option value="">{ph}</option>{opts.map(o=><option key={o} value={o}>{o}</option>)}</select>; }
 
 // Sélecteur produit avec option "Produit libre" → champ de saisie manuelle
-function SelProduit({value,onChange,opts}){
+// Comparaison de noms sans accents / majuscules / espaces superflus (ex: "chene " = "Chêne")
+const normNom = v => String(v||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/\s+/g," ").trim();
+// Prix global correspondant à une essence (même saisie libre)
+function tarifPour(tarifs, essence){
+  const n=normNom(essence); if(!n) return "";
+  if(tarifs[essence]) return String(tarifs[essence]);
+  const k=Object.keys(tarifs).find(x=>normNom(x)===n);
+  return k&&tarifs[k]!==""?String(tarifs[k]):"";
+}
+function SelEssence({value,onChange,opts}){ return <SelProduit value={value} onChange={onChange} opts={opts} libreLabel="✏️ Essence libre…" librePh="Saisir l'essence à la main"/>; }
+function SelProduit({value,onChange,opts,libreLabel="✏️ Produit libre…",librePh="Saisir le produit à la main"}){
   const isLibre = value!=="" && !opts.includes(value);
   const [libreMode,setLibreMode] = useState(isLibre);
   useEffect(()=>{ if(isLibre) setLibreMode(true); },[isLibre]);
@@ -1293,10 +1303,10 @@ function SelProduit({value,onChange,opts}){
       }}>
       <option value="">— choisir —</option>
       {opts.map(o=><option key={o} value={o}>{o}</option>)}
-      <option value="__libre__">✏️ Produit libre…</option>
+      <option value="__libre__">{libreLabel}</option>
     </select>
     {libreMode&&
-      <input style={S.input} value={value} onChange={onChange} placeholder="Saisir le produit à la main"/>
+      <input style={S.input} value={value} onChange={onChange} placeholder={librePh}/>
     }
   </div>;
 }
@@ -1381,6 +1391,7 @@ export default function App(){
     catch(e){ return {}; }
   });
   const [newTarifEss,setNewTarifEss]=useState("");
+  const [newTarifLibre,setNewTarifLibre]=useState(false);
   const saveTarif=(essence,prix)=>{
     const t={...tarifs};
     if(prix===""){ delete t[essence]; }
@@ -1390,7 +1401,7 @@ export default function App(){
     if(prix!==""){
       setForm(p=>({
         ...p,
-        lignes:p.lignes.map(l=>l.essence===essence?{...l,prixUnitaire:String(prix)}:l)
+        lignes:p.lignes.map(l=>normNom(l.essence)===normNom(essence)?{...l,prixUnitaire:String(prix)}:l)
       }));
     }
   };
@@ -1508,8 +1519,12 @@ export default function App(){
       const ls=[...p.lignes];
       ls[i]={...ls[i],[f]:val};
       // Auto-remplir le prix si on change l'essence et qu'un tarif existe
-      if(f==="essence"&&tarifs[val]&&(!ls[i].prixUnitaire||ls[i].prixUnitaire==="0")){
-        ls[i]={...ls[i],prixUnitaire:String(tarifs[val])};
+      if(f==="essence"){
+        const t=tarifPour(tarifs,val);
+        const prev=p.lignes[i];
+        // on remplit si le prix est vide, ou s'il venait du tarif de l'essence précédente
+        const venaitDuTarif=prev.prixUnitaire&&prev.prixUnitaire===tarifPour(tarifs,prev.essence);
+        if(t&&(!prev.prixUnitaire||prev.prixUnitaire==="0"||venaitDuTarif)) ls[i]={...ls[i],prixUnitaire:t};
       }
       return{...p,lignes:ls};
     });
@@ -1832,9 +1847,10 @@ export default function App(){
             </div>
             {(()=>{
               // Construire la liste : les essences déjà configurées + une ligne vide à la fin
-              const configured = ESSENCES.filter(e=>tarifs[e]&&tarifs[e]!=="");
-              const available  = ESSENCES.filter(e=>!tarifs[e]||tarifs[e]==="");
-              const showNew    = available.length>0;
+              const configured = Object.keys(tarifs).filter(e=>tarifs[e]!==""&&tarifs[e]!=null)
+                .sort((a,b)=>{ const ia=ESSENCES.indexOf(a), ib=ESSENCES.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b,"fr"); });
+              const available  = ESSENCES.filter(e=>!configured.some(c=>normNom(c)===normNom(e)));
+              const showNew    = true;
               return <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {/* Lignes configurées */}
                 {configured.map(ess=>(
@@ -1862,24 +1878,36 @@ export default function App(){
                 {/* Ligne nouvelle essence — s'affiche seulement si il reste des essences */}
                 {showNew&&(
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8,alignItems:"center"}}>
+                    {newTarifLibre?
+                      <div style={{display:"flex",gap:4}}>
+                        <input autoFocus value={newTarifEss} onChange={ev=>setNewTarifEss(ev.target.value)}
+                          placeholder="Nom de l'essence" style={{...S.input,width:"100%",fontSize:13}}/>
+                        <button type="button" title="Revenir à la liste" onClick={()=>{setNewTarifLibre(false);setNewTarifEss("");}}
+                          style={{background:"transparent",border:"none",color:"#8A9BB0",cursor:"pointer",fontSize:14}}>↺</button>
+                      </div>
+                    :
                     <select value={newTarifEss}
-                      onChange={ev=>setNewTarifEss(ev.target.value)}
+                      onChange={ev=>{ if(ev.target.value==="__libre__"){ setNewTarifLibre(true); setNewTarifEss(""); } else setNewTarifEss(ev.target.value); }}
                       style={{...S.input,color:newTarifEss?"#E8ECEF":"#8A9BB0",fontSize:13}}>
                       <option value="">— Essence —</option>
                       {available.map(e=><option key={e} value={e}>{e}</option>)}
-                    </select>
+                      <option value="__libre__">✏️ Essence libre…</option>
+                    </select>}
                     <input
                       key={"new_"+newTarifEss}
                       defaultValue=""
                       onBlur={ev=>{
-                        if(!newTarifEss||!ev.target.value) return;
-                        saveTarif(newTarifEss, ev.target.value);
-                        setNewTarifEss("");
+                        const nom=newTarifEss.trim();
+                        if(!nom||!ev.target.value) return;
+                        // si le nom existe déjà (même sans accents/majuscules), on met à jour celui-là
+                        const exist=Object.keys(tarifs).find(k=>normNom(k)===normNom(nom));
+                        saveTarif(exist||nom, ev.target.value);
+                        setNewTarifEss(""); setNewTarifLibre(false);
                         ev.target.value="";
                       }}
-                      disabled={!newTarifEss}
-                      placeholder={newTarifEss?"Ex: 550":"€/m³"}
-                      style={{...S.input,width:"100%",opacity:newTarifEss?1:0.4}}
+                      disabled={!newTarifEss.trim()}
+                      placeholder={newTarifEss.trim()?"Ex: 550":"€/m³"}
+                      style={{...S.input,width:"100%",opacity:newTarifEss.trim()?1:0.4}}
                     />
                     <div style={{width:24}}/>
                   </div>
@@ -1907,7 +1935,7 @@ export default function App(){
               </Field>
               <Row2 style={{marginBottom:10}}>
                 <Field label="Produit"><SelProduit value={lg.produit} onChange={sl(i,"produit")} opts={PRODUITS}/></Field>
-                <Field label="Essence"><Sel value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
+                <Field label="Essence"><SelEssence value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
               </Row2>
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
@@ -2651,7 +2679,7 @@ export default function App(){
             </Field>
             <Row2 style={{marginBottom:12}}>
               <Field label="Produit"><SelProduit value={freeForm.produit} onChange={sfree("produit")} opts={PRODUITS}/></Field>
-              <Field label="Essence"><Sel value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
+              <Field label="Essence"><SelEssence value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
             </Row2>
             <Field label="Qualité"><Sel value={freeForm.qualite} onChange={sfree("qualite")} opts={QUALITES}/></Field>
           </Card>
