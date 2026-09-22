@@ -1190,7 +1190,11 @@ async function fetchClientsCRM(){
   const sb=await getSupabase();
   const {data,error}=await sb.rpc("liste_clients_crm");
   if(error) throw new Error(error.message);
-  return (data||[]).filter(c=>c.nom&&c.nom.trim()).sort((a,b)=>a.nom.localeCompare(b.nom,"fr",{sensitivity:"base"}));
+  const vus=new Set();
+  return (data||[])
+    .filter(c=>c.nom&&c.nom.trim())
+    .filter(c=>{ const k=normNom(c.nom); if(vus.has(k)) return false; vus.add(k); return true; }) // évite les doublons de noms
+    .sort((a,b)=>a.nom.localeCompare(b.nom,"fr",{sensitivity:"base"}));
 }
 // Sélecteur client : liste du CRM + saisie libre (comme les produits)
 function SelClientCRM({value,clientId,clients,onPick}){
