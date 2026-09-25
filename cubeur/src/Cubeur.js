@@ -12,7 +12,7 @@ const UNITES   = ["m³","m²","mL"];
 
 // unite par défaut = m³
 const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
-const initCmd   = { client:"",clientId:"",chantier:"",devisStatut:"en_attente",dateLivraison:"",notes:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
+const initCmd   = { client:"",clientId:"",chantier:"",devisStatut:"en_attente",dateLivraison:"",notes:"",telClient:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -516,6 +516,7 @@ async function genererDevisPDF(form, cmdId){
   if(form.adresseClient){
     doc.splitTextToSize(form.adresseClient, 84).forEach(l=>{ doc.text(l,112,yc); yc+=4; });
   }
+  if(form.telClient){ doc.text(`Tél. : ${form.telClient}`, 112, yc); yc+=4; }
   if(form.adresseLivraison && form.adresseLivraison !== form.adresseClient){
     yc+=1;
     doc.setTextColor(...GRIS);
@@ -864,6 +865,7 @@ async function genererFacturePDF(form, cmdId){
   doc.setFontSize(8);
   doc.setTextColor(...NOIR);
   if(form.adresseClient){ doc.splitTextToSize(form.adresseClient,80).forEach(l=>{doc.text(l,110,yc);yc+=4;}); }
+  if(form.telClient){ doc.text(`Tél. : ${form.telClient}`,110,yc); yc+=4; }
 
   // ── Titre FACTURE + numéro/dates (colonne gauche) ──
   doc.setFont("helvetica","normal");
@@ -1112,7 +1114,7 @@ function getSupabase(){
 }
 const sbStr=v=>(v===null||v===undefined)?"":String(v);
 const sbNum=v=>{ const t=sbStr(v).trim(); if(!t||t==="0")return ""; const n=parseFloat(t.replace(",",".")); return (!isNaN(n)&&n>0)?String(n):""; };
-const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut","clientId","totalHT"];
+const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut","clientId","totalHT","telClient"];
 const SCIEUR_COLS=["date","cmd_id","prod_id","produit","essence","qualite","epaisseur","largeur","longueur","nb_unites","vol_grume","vol_unitaire","vol_charge","vol_reel","rendement","perte","unite"];
 // Lignes "Sheet" (tableaux positionnels) → 1 enregistrement commande
 function rowsToCommande(rows,id){
@@ -1124,7 +1126,7 @@ function rowsToCommande(rows,id){
     date_creation:h.dateCreation||"", adresse_client:h.adresseClient||"", adresse_livraison:h.adresseLivraison||"",
     remise:h.remise||"", livraison_type:h.livraisonType||"", livraison_val:h.livraisonVal||"",
     devis_statut:h.devisStatut||"en_attente",
-    client_id:h.clientId||null, total_ht:h.totalHT||"",
+    client_id:h.clientId||null, total_ht:h.totalHT||"", tel_client:h.telClient||"",
     lignes:objs.map(o=>({ produit:o.produit, essence:o.essence, qualite:o.qualite,
       epaisseur:o.epaisseur, largeur:o.largeur, longueur:o.longueur, quantite:o.quantite,
       prodId:o.prodId, unite:o.unite||"m³", prixUnitaire:o.prixUnitaire,
@@ -1138,7 +1140,7 @@ function commandeToApp(c){
     dateLivraison:sbStr(c.date_livraison), notes:sbStr(c.notes), statut:c.statut||"attente",
     dateCreation:sbStr(c.date_creation), adresseClient:sbStr(c.adresse_client), adresseLivraison:sbStr(c.adresse_livraison),
     remise:sbStr(c.remise), livraisonType:sbStr(c.livraison_type), livraisonVal:sbStr(c.livraison_val),
-    clientId:c.client_id||"", totalHT:sbStr(c.total_ht),
+    clientId:c.client_id||"", totalHT:sbStr(c.total_ht), telClient:sbStr(c.tel_client),
     devisStatut:c.devis_statut||"accepte", // anciennes commandes (avant l'option) = considérées acceptées
     lignes:(c.lignes||[]).map(l=>({ ...l,
       produit:sbStr(l.produit), essence:sbStr(l.essence), qualite:sbStr(l.qualite),
@@ -1563,7 +1565,8 @@ export default function App(){
       i===0?form.chantier||"":"",
       i===0?(form.devisStatut||"en_attente"):"",
       i===0?form.clientId||"":"",
-      i===0?String(totalCommandeHT(form)):""
+      i===0?String(totalCommandeHT(form)):"",
+      i===0?form.telClient||"":""
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1826,7 +1829,8 @@ export default function App(){
               <Field label="Client *">
                 <SelClientCRM value={form.client} clientId={form.clientId||""} clients={crmClients}
                   onPick={c=>setForm(p=>({...p,client:c.nom,clientId:c.id,
-                    adresseClient:(c.id&&c.adresse&&!p.adresseClient)?c.adresse:p.adresseClient}))}/>
+                    adresseClient:(c.id&&c.adresse)?c.adresse:(c.id?p.adresseClient:""),
+                    telClient:(c.id&&c.tel)?c.tel:(c.id?p.telClient:"")}))}/>
                 {crmErr&&<div style={{fontSize:10,color:"#FF9F0A",marginTop:4}}>Liste CRM indisponible — saisie libre possible</div>}
               </Field>
               <Field label="Chantier / Référence">
@@ -1835,6 +1839,9 @@ export default function App(){
             </Row2>
             <Field label="Date de livraison souhaitée" style={{marginBottom:12}}>
               <Inp type="date" value={form.dateLivraison} onChange={sf("dateLivraison")} min={today()}/>
+            </Field>
+            <Field label="Téléphone client (optionnel)" style={{marginBottom:12}}>
+              <Inp type="tel" value={form.telClient||""} onChange={sf("telClient")} ph="Ex: 06 12 34 56 78"/>
             </Field>
             <Field label="Adresse client (optionnel)" style={{marginBottom:12}}>
               <Inp value={form.adresseClient||""} onChange={sf("adresseClient")} ph="Ex: 15 rue du Moulin, 73000 Chambéry"/>
@@ -2208,7 +2215,8 @@ export default function App(){
                     i===0?form.chantier||"":"",
                     i===0?(form.devisStatut||"en_attente"):"",
                     i===0?form.clientId||"":"",
-                    i===0?String(totalCommandeHT(form)):""
+                    i===0?String(totalCommandeHT(form)):"",
+                    i===0?form.telClient||"":""
                   ]);
                   try{
                     await callScript(scriptUrl,{type:"commande",rows,id:bid});
@@ -2271,7 +2279,7 @@ export default function App(){
                         onClick={()=>{
                           setForm({
                             client:c.client||"",clientId:c.clientId||"",chantier:c.chantier||"",devisStatut:"en_attente",dateLivraison:c.dateLivraison||c.datelivraison||"",
-                            notes:c.notes||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",remise:c.remise||"",
+                            notes:c.notes||"",telClient:c.telClient||"",adresseClient:c.adresseClient||"",adresseLivraison:c.adresseLivraison||"",remise:c.remise||"",
                             livraisonType:c.livraisonType||"",livraisonVal:c.livraisonVal||"",
                             lignes:(c.lignes||[]).map(l=>({
                               produit:l.produit||"",essence:l.essence||"",qualite:l.qualite||"",
@@ -2335,9 +2343,9 @@ export default function App(){
                     )}
                     <div style={{display:"flex",gap:6}}>
                       <button style={{...S.btnExport,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center"}}
-                        onClick={()=>genererDevisPDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
+                        onClick={()=>genererDevisPDF({...c,telClient:c.telClient||'',adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur PDF: '+e.message))}>📄 Devis</button>
                       <button style={{...S.btnSmall,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center",color:"#0A84FF",borderColor:"rgba(10,132,255,.3)"}}
-                        onClick={()=>genererFacturePDF({...c,adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur Facture: '+e.message))}>🧾 Facture</button>
+                        onClick={()=>genererFacturePDF({...c,telClient:c.telClient||'',adresseClient:c.adresseClient||'',adresseLivraison:c.adresseLivraison||'',remise:c.remise||'',livraisonType:c.livraisonType||'',livraisonVal:c.livraisonVal||''},c.id).catch(e=>alert('Erreur Facture: '+e.message))}>🧾 Facture</button>
                       {["attente","En attente"].includes(c.statut||"attente")&&
                         <button style={{...S.btnSmall,flex:1,fontSize:11,padding:"6px 8px",textAlign:"center",color:"#FF9F0A",borderColor:"rgba(255,159,10,.3)"}}
                           onClick={()=>{
@@ -2349,6 +2357,7 @@ export default function App(){
                               devisStatut:c.devisStatut||"en_attente",
                               dateLivraison:c.dateLivraison||c.datelivraison||"",
                               notes:c.notes||"",
+                              telClient:c.telClient||"",
                               adresseClient:c.adresseClient||"",
                               adresseLivraison:c.adresseLivraison||"",
                               remise:c.remise||"",
