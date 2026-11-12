@@ -2144,6 +2144,10 @@ export default function App(){
                   })}
                 </div>
                 {(lg.options||[]).length>0&&
+                  <div style={{fontSize:11,color:"#0A84FF",marginBottom:6}}>
+                    Les suppléments s'ajoutent au prix du produit · visibles sur le bon de sciage, pas sur le devis
+                  </div>}
+                {(lg.options||[]).length>0&&
                   <div style={{display:"flex",flexDirection:"column",gap:5}}>
                     {(lg.options||[]).map(opt=>(
                       <div key={opt} style={{display:"flex",alignItems:"center",gap:8}}>
@@ -2235,6 +2239,25 @@ export default function App(){
                 </div>
                 <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph={`Ex: ${(lg.typeTaxe||"HT")==="TTC"?"660":"550"} €/${lg.typePrix||lg.unite||"m³"} (${lg.typeTaxe||"HT"})`}/>
               </div>
+
+              {/* Prix réellement appliqué = prix saisi + suppléments des options */}
+              {(()=>{
+                const sup=optionsSupp(lg);
+                if(!sup) return null;
+                const base=pf(lg.prixUnitaire)||0;
+                const uP=lg.typePrix||lg.unite||"m³";
+                return <div style={{marginTop:8,background:"rgba(10,132,255,.08)",border:"1px solid rgba(10,132,255,.25)",borderRadius:8,padding:"9px 11px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+                    <span style={{fontSize:11,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:.3}}>Prix appliqué</span>
+                    <span style={{fontSize:16,fontWeight:700,color:"#0A84FF"}}>
+                      {round(base+sup,2)} €/{uP} {(lg.typeTaxe||"HT")}
+                    </span>
+                  </div>
+                  <div style={{fontSize:11,color:"#8A9BB0",marginTop:3}}>
+                    {base} €/{uP} + {(lg.options||[]).map(o=>`${o} ${pf((lg.optionsPrix||{})[o])||0} €`).join(" + ")}
+                  </div>
+                </div>;
+              })()}
 
               {/* Résultat : m³ + montant en temps réel */}
               {(()=>{
