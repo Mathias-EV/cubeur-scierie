@@ -5,13 +5,14 @@ const SHEET_ID = "1vBmNCK0vmQRIHy6S1btXgSWugznmr_L-P3wkH7Xj_w4";
 const APPS_SCRIPT_URL_KEY = "cubeur_script_url";
 
 // ─── DONNÉES ──────────────────────────────────────────────────────────────────
-const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau"];
+const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau","Lambris","Parquet","Lame de terrasse"];
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
 const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
 const UNITES   = ["m³","m²","mL"];
+const OPTIONS  = ["Sec","Raboté","Mouluré"];
 
 // unite par défaut = m³
-const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT" };
+const initLigne = { produit:"",essence:"",qualite:"",epaisseur:"",largeur:"",longueur:"",quantite:"",unite:"m³",prixUnitaire:"",typePrix:"m³",typeTaxe:"HT",note:"",noteRouge:false,options:[],optionsPrix:{} };
 const initCmd   = { client:"",clientId:"",chantier:"",devisStatut:"en_attente",dateLivraison:"",notes:"",interlocuteur:"",telClient:"",adresseClient:"",adresseLivraison:"",remise:"",livraisonType:"",livraisonVal:"",lignes:[{...initLigne}] };
 const initCube  = { produit:"",essence:"",epaisseur:"",largeur:"",longueur:"",qualite:"",nbUnites:"",volumeGrume:"",unite:"m³" };
 
@@ -94,9 +95,15 @@ function nbUnitesMl(l){
   return Math.ceil(totalMl/lo);
 }
 
-// Calcul HT selon le type de prix choisi (gère HT et TTC)
+// Supplément de prix dû aux options cochées (Sec, Raboté, Mouluré)
+function optionsSupp(l){
+  const px=l.optionsPrix||{};
+  return (l.options||[]).reduce((t,o)=>{ const v=pf(px[o]); return t+(isNaN(v)?0:v); },0);
+}
+
+// Calcul HT selon le type de prix choisi (gère HT et TTC, options incluses)
 function ligneHT(l){
-  let p=pf(l.prixUnitaire);
+  let p=(pf(l.prixUnitaire)||0)+optionsSupp(l);
   if(!p||p<=0) return null;
   // Si le prix saisi est TTC, le ramener en HT
   if((l.typeTaxe||"HT")==="TTC") p=round(p/1.2,4);
@@ -266,11 +273,30 @@ async function imprimerCommande(cmd){
   doc.text("✓",cols.check+6,y+5.5,{align:"center"});
   y+=8;
 
+  const enTeteTableau=(yy)=>{
+    doc.setFillColor(...BRUN);
+    doc.rect(14,yy,192,8,"F");
+    doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(250,243,232);
+    doc.text("N°",cols.n+1,yy+5.5);doc.text("Produit",cols.prod+1,yy+5.5);
+    doc.text("Essence",cols.ess+1,yy+5.5);doc.text("Qualité",cols.qual+1,yy+5.5);
+    doc.text("Ép.",cols.ep+1,yy+5.5);doc.text("Larg.",cols.la+1,yy+5.5);
+    doc.text("Long.",cols.lo+1,yy+5.5);doc.text("Qté / Vol.",cols.qte+1,yy+5.5);
+    doc.text("✓",cols.check+6,yy+5.5,{align:"center"});
+    return yy+8;
+  };
+
   (cmd.lignes||[]).forEach((l,i)=>{
     const u=l.unite||"m³";
     const nb=pf(l.quantite)||0;
     const vol=volLigneM3(l);
-    const rowH=13;
+    // Hauteur variable : options et note du produit s'ajoutent sous la ligne
+    const opts=(l.options||[]).filter(Boolean);
+    const noteTxt=String(l.note||"").trim();
+    doc.setFontSize(8);
+    const noteLines=noteTxt?doc.splitTextToSize(noteTxt,168):[];
+    const rowH=13+(opts.length?5:0)+(noteLines.length?noteLines.length*4.4+2:0);
+    // Saut de page avant la ligne si elle ne tient pas
+    if(y+rowH>268){ doc.addPage(); y=14; y=enTeteTableau(y); }
     const bg=i%2===0?[255,255,255]:[248,250,245];
     doc.setFillColor(...bg);
     doc.rect(14,y,192,rowH,"F");
@@ -314,30 +340,36 @@ async function imprimerCommande(cmd){
 
     doc.setFontSize(8); doc.setTextColor(...NOIR);
 
+    // ── Options (Sec / Raboté / Mouluré) ──
+    let yy=y+9;
+    if(opts.length){
+      doc.setFont("helvetica","bold"); doc.setFontSize(7.8); doc.setTextColor(10,110,190);
+      doc.text("OPTIONS : "+opts.join("  ·  ").toUpperCase(),cols.prod+1,yy);
+      yy+=5;
+    }
+    // ── Note du produit (rouge gras si marquée importante) ──
+    if(noteLines.length){
+      if(l.noteRouge){
+        doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(200,0,0);
+        doc.setFillColor(255,235,235);
+        doc.rect(cols.prod-2,yy-3.6,178,noteLines.length*4.4+2.4,"F");
+        doc.setDrawColor(200,0,0); doc.setLineWidth(0.8);
+        doc.line(cols.prod-2,yy-3.6,cols.prod-2,yy+noteLines.length*4.4-1.2);
+        noteLines.forEach((ln,k)=>doc.text((k===0?"!! ":"   ")+ln,cols.prod+1,yy+k*4.4));
+      } else {
+        doc.setFont("helvetica","italic"); doc.setFontSize(8); doc.setTextColor(...GRIS);
+        noteLines.forEach((ln,k)=>doc.text((k===0?"Note : ":"       ")+ln,cols.prod+1,yy+k*4.4));
+      }
+    }
+
     // Case à cocher
     doc.setDrawColor(...GRIS_L); doc.setLineWidth(0.4);
     doc.rect(cols.check+3,y+2,7,7);
 
     // Ligne séparatrice
-    doc.setLineWidth(0.2);
+    doc.setLineWidth(0.2); doc.setDrawColor(...GRIS_L);
     doc.line(14,y+rowH,206,y+rowH);
     y+=rowH;
-
-    // Nouvelle page si besoin
-    if(y>260){
-      doc.addPage();
-      y=14;
-      // Répéter l'en-tête
-      doc.setFillColor(...BRUN);
-      doc.rect(14,y,192,8,"F");
-      doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(250,243,232);
-      doc.text("N°",cols.n+1,y+5.5);doc.text("Produit",cols.prod+1,y+5.5);
-      doc.text("Essence",cols.ess+1,y+5.5);doc.text("Qualité",cols.qual+1,y+5.5);
-      doc.text("Ép.",cols.ep+1,y+5.5);doc.text("Larg.",cols.la+1,y+5.5);
-      doc.text("Long.",cols.lo+1,y+5.5);doc.text("Qté / Vol.",cols.qte+1,y+5.5);
-      doc.text("✓",cols.check+6,y+5.5,{align:"center"});
-      y+=8;
-    }
   });
 
   y+=8;
@@ -565,7 +597,8 @@ async function genererDevisPDF(form, cmdId){
     const u = l.unite||"m³";
     const nb = pf(l.quantite)||0;
     const isTTC = (l.typeTaxe||"HT")==="TTC";
-    let puNum = pf(l.prixUnitaire)||0;
+    // prix unitaire affiché = prix de base + suppléments des options (les options ne sont pas détaillées sur le devis)
+    let puNum = (pf(l.prixUnitaire)||0)+optionsSupp(l);
     if(isTTC) puNum = round(puNum/1.2, 4);
     const tp = (l.typePrix||u)==="m³direct"?"m³":l.typePrix||u;
     const vol = volLigneM3(l);
@@ -934,7 +967,7 @@ async function genererFacturePDF(form, cmdId){
     const u=l.unite||"m3";
     const nb=pf(l.quantite)||0;
     const isTTC=(l.typeTaxe||"HT")==="TTC";
-    let puNum=pf(l.prixUnitaire)||0;
+    let puNum=(pf(l.prixUnitaire)||0)+optionsSupp(l);
     if(isTTC) puNum=round(puNum/1.2,4);
     const vol=volLigneM3(l);
     const htRaw=ligneHT(l);
@@ -1116,7 +1149,7 @@ function getSupabase(){
 }
 const sbStr=v=>(v===null||v===undefined)?"":String(v);
 const sbNum=v=>{ const t=sbStr(v).trim(); if(!t||t==="0")return ""; const n=parseFloat(t.replace(",",".")); return (!isNaN(n)&&n>0)?String(n):""; };
-const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut","clientId","totalHT","telClient","interlocuteur"];
+const VENDEUR_COLS=["id","client","produit","essence","qualite","epaisseur","largeur","longueur","quantite","dateLivraison","notes","statut","dateCreation","prodId","unite","prixUnitaire","typePrix","typeTaxe","adresseClient","adresseLivraison","remise","livraisonType","livraisonVal","chantier","devisStatut","clientId","totalHT","telClient","interlocuteur","ligneNote","ligneNoteRouge","ligneOptions"];
 const SCIEUR_COLS=["date","cmd_id","prod_id","produit","essence","qualite","epaisseur","largeur","longueur","nb_unites","vol_grume","vol_unitaire","vol_charge","vol_reel","rendement","perte","unite"];
 // Lignes "Sheet" (tableaux positionnels) → 1 enregistrement commande
 function rowsToCommande(rows,id){
@@ -1132,7 +1165,10 @@ function rowsToCommande(rows,id){
     lignes:objs.map(o=>({ produit:o.produit, essence:o.essence, qualite:o.qualite,
       epaisseur:o.epaisseur, largeur:o.largeur, longueur:o.longueur, quantite:o.quantite,
       prodId:o.prodId, unite:o.unite||"m³", prixUnitaire:o.prixUnitaire,
-      typePrix:o.typePrix||o.unite||"m³", typeTaxe:o.typeTaxe||"HT" }))
+      typePrix:o.typePrix||o.unite||"m³", typeTaxe:o.typeTaxe||"HT",
+      note:o.ligneNote||"", noteRouge:o.ligneNoteRouge==="1",
+      options:(function(){ try{ return (JSON.parse(o.ligneOptions||"{}").o)||[]; }catch(e){ return []; } })(),
+      optionsPrix:(function(){ try{ return (JSON.parse(o.ligneOptions||"{}").p)||{}; }catch(e){ return {}; } })() }))
   };
 }
 // Commande au format renvoyé par l'app (identique à l'ancien getCommandes)
@@ -1148,7 +1184,8 @@ function commandeToApp(c){
       produit:sbStr(l.produit), essence:sbStr(l.essence), qualite:sbStr(l.qualite),
       epaisseur:sbStr(l.epaisseur), largeur:sbStr(l.largeur),
       longueur:sbNum(l.longueur), quantite:sbNum(l.quantite), prodId:sbStr(l.prodId),
-      unite:l.unite||"m³", prixUnitaire:sbStr(l.prixUnitaire), typePrix:l.typePrix||l.unite||"m³", typeTaxe:l.typeTaxe||"HT" }))
+      unite:l.unite||"m³", prixUnitaire:sbStr(l.prixUnitaire), typePrix:l.typePrix||l.unite||"m³", typeTaxe:l.typeTaxe||"HT",
+      note:sbStr(l.note), noteRouge:!!l.noteRouge, options:l.options||[], optionsPrix:l.optionsPrix||{} }))
   };
 }
 function scieurRow(row,cle){
@@ -1214,9 +1251,9 @@ function SelClientCRM({value,clientId,clients,onPick}){
       else { setLibreMode(false); const c=clients.find(x=>x.id===v); if(c) onPick(c); }
     }}>
       <option value="">— choisir un client —</option>
+      <option value="__libre__">✏️ Client libre (hors CRM)…</option>
       {clientId&&!clients.some(c=>c.id===clientId)&&<option value={clientId}>{value}</option>}
       {clients.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
-      <option value="__libre__">✏️ Client libre (hors CRM)…</option>
     </select>
     {libreMode&&<input style={S.input} value={value} onChange={e=>onPick({id:"",nom:e.target.value,adresse:null})} placeholder="Nom du client"/>}
   </div>;
@@ -1295,6 +1332,18 @@ function tarifPour(tarifs, essence){
   if(tarifs[essence]) return String(tarifs[essence]);
   const k=Object.keys(tarifs).find(x=>normNom(x)===n);
   return k&&tarifs[k]!==""?String(tarifs[k]):"";
+}
+// Clé d'un tarif « produit + essence » (insensible aux accents/majuscules)
+function clePE(prod,ess){ return normNom(prod)+"|"+normNom(ess); }
+// Prix pour un couple produit+essence (ex : Lambris + Épicéa)
+function tarifPEPour(tpe,prod,ess){
+  if(!prod||!ess) return "";
+  const v=tpe[clePE(prod,ess)];
+  return (v!==undefined&&v!=="")?String(v):"";
+}
+// Tarif à appliquer : d'abord produit+essence, sinon essence seule
+function meilleurTarif(tarifs,tpe,prod,ess){
+  return tarifPEPour(tpe,prod,ess) || tarifPour(tarifs,ess);
 }
 function SelEssence({value,onChange,opts}){ return <SelProduit value={value} onChange={onChange} opts={opts} libreLabel="✏️ Essence libre…" librePh="Saisir l'essence à la main"/>; }
 function SelProduit({value,onChange,opts,libreLabel="✏️ Produit libre…",librePh="Saisir le produit à la main"}){
@@ -1400,6 +1449,46 @@ export default function App(){
   });
   const [newTarifEss,setNewTarifEss]=useState("");
   const [newTarifLibre,setNewTarifLibre]=useState(false);
+
+  // ── Tarifs par produit + essence (ex : Lambris en Épicéa = 700 €/m³) ──
+  const [tarifsPE,setTarifsPE]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("cubeur_tarifs_pe")||"{}"); }catch(e){ return {}; }
+  });
+  const [npeProd,setNpeProd]=useState(""), [npeEss,setNpeEss]=useState(""), [npePrix,setNpePrix]=useState("");
+  const saveTarifPE=(prod,ess,prix)=>{
+    const t={...tarifsPE}; const k=clePE(prod,ess);
+    if(prix===""){ delete t[k]; delete t["lbl_"+k]; }
+    else { t[k]=prix; t["lbl_"+k]=prod+" · "+ess; }
+    setTarifsPE(t); localStorage.setItem("cubeur_tarifs_pe",JSON.stringify(t));
+    if(prix!==""){
+      setForm(p=>({...p,lignes:p.lignes.map(l=>
+        (normNom(l.produit)===normNom(prod)&&normNom(l.essence)===normNom(ess))?{...l,prixUnitaire:String(prix)}:l)}));
+    }
+  };
+
+  // ── Prix des options (Sec, Raboté, Mouluré) ──
+  const [tarifsOpt,setTarifsOpt]=useState(()=>{
+    try{ return JSON.parse(localStorage.getItem("cubeur_tarifs_opt")||"{}"); }catch(e){ return {}; }
+  });
+  const saveTarifOpt=(opt,prix)=>{
+    const t={...tarifsOpt};
+    if(prix==="") delete t[opt]; else t[opt]=prix;
+    setTarifsOpt(t); localStorage.setItem("cubeur_tarifs_opt",JSON.stringify(t));
+  };
+  // Coche/décoche une option sur un produit (prix général pré-rempli, modifiable ensuite)
+  const toggleOption=(i,opt)=>setForm(p=>{
+    const ls=[...p.lignes]; const l={...ls[i]};
+    const on=(l.options||[]).indexOf(opt)>=0;
+    l.options = on ? (l.options||[]).filter(o=>o!==opt) : [...(l.options||[]),opt];
+    const px={...(l.optionsPrix||{})};
+    if(on) delete px[opt];
+    else if(px[opt]===undefined||px[opt]==="") px[opt]=tarifsOpt[opt]||"";
+    l.optionsPrix=px; ls[i]=l; return {...p,lignes:ls};
+  });
+  const setOptionPrix=(i,opt,val)=>setForm(p=>{
+    const ls=[...p.lignes]; ls[i]={...ls[i],optionsPrix:{...(ls[i].optionsPrix||{}),[opt]:val}};
+    return {...p,lignes:ls};
+  });
   const saveTarif=(essence,prix)=>{
     const t={...tarifs};
     if(prix===""){ delete t[essence]; }
@@ -1526,12 +1615,14 @@ export default function App(){
     setForm(p=>{
       const ls=[...p.lignes];
       ls[i]={...ls[i],[f]:val};
-      // Auto-remplir le prix si on change l'essence et qu'un tarif existe
-      if(f==="essence"){
-        const t=tarifPour(tarifs,val);
+      // Auto-remplir le prix quand on change le produit ou l'essence
+      if(f==="essence"||f==="produit"){
         const prev=p.lignes[i];
-        // on remplit si le prix est vide, ou s'il venait du tarif de l'essence précédente
-        const venaitDuTarif=prev.prixUnitaire&&prev.prixUnitaire===tarifPour(tarifs,prev.essence);
+        const prod=f==="produit"?val:prev.produit, ess=f==="essence"?val:prev.essence;
+        const t=meilleurTarif(tarifs,tarifsPE,prod,ess);
+        // on remplit si le prix est vide ou s'il venait du tarif précédent
+        const ancien=meilleurTarif(tarifs,tarifsPE,prev.produit,prev.essence);
+        const venaitDuTarif=prev.prixUnitaire&&prev.prixUnitaire===ancien;
         if(t&&(!prev.prixUnitaire||prev.prixUnitaire==="0"||venaitDuTarif)) ls[i]={...ls[i],prixUnitaire:t};
       }
       return{...p,lignes:ls};
@@ -1569,7 +1660,10 @@ export default function App(){
       i===0?form.clientId||"":"",
       i===0?String(totalCommandeHT(form)):"",
       i===0?form.telClient||"":"",
-      i===0?form.interlocuteur||"":""
+      i===0?form.interlocuteur||"":"",
+      l.note||"",
+      l.noteRouge?"1":"",
+      JSON.stringify({o:l.options||[],p:l.optionsPrix||{}})
     ]);
     try{
       await callScript(scriptUrl,{type:"commande",rows,id});
@@ -1948,6 +2042,69 @@ export default function App(){
             })()}
           </Card>
 
+          {/* ── Tarifs par produit + essence (ex : Lambris en Épicéa = 700 €/m³) ── */}
+          <Card title="Tarifs par produit + essence (optionnel)">
+            <div style={{fontSize:12,color:"#8A9BB0",marginBottom:10}}>
+              Prioritaire sur le tarif de l'essence seule · Ex : Lambris · Épicéa = 700 €/m³
+            </div>
+            {(()=>{
+              const cles=Object.keys(tarifsPE).filter(k=>k.indexOf("lbl_")!==0);
+              return <>
+                {cles.map(k=>(
+                  <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{flex:1,fontSize:13,color:"#E8ECEF",fontWeight:600}}>
+                      {tarifsPE["lbl_"+k]||k.replace("|"," · ")}
+                    </span>
+                    <input defaultValue={tarifsPE[k]} inputMode="decimal"
+                      onBlur={ev=>{
+                        const t={...tarifsPE};
+                        if(ev.target.value===""){ delete t[k]; delete t["lbl_"+k]; }
+                        else t[k]=ev.target.value;
+                        setTarifsPE(t); localStorage.setItem("cubeur_tarifs_pe",JSON.stringify(t));
+                      }}
+                      style={{...S.input,width:100,textAlign:"right",fontSize:13}}/>
+                    <span style={{fontSize:11,color:"#8A9BB0",width:30}}>€/m³</span>
+                    <button type="button" onClick={()=>{
+                        const t={...tarifsPE}; delete t[k]; delete t["lbl_"+k];
+                        setTarifsPE(t); localStorage.setItem("cubeur_tarifs_pe",JSON.stringify(t));
+                      }}
+                      style={{background:"transparent",border:"none",color:"#8A9BB0",cursor:"pointer",fontSize:15}}>✕</button>
+                  </div>
+                ))}
+                <div style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:cles.length?10:0}}>
+                  <div style={{flex:1}}><SelProduit value={npeProd} onChange={ev=>setNpeProd(ev.target.value)} opts={PRODUITS}/></div>
+                  <div style={{flex:1}}><SelEssence value={npeEss} onChange={ev=>setNpeEss(ev.target.value)} opts={ESSENCES}/></div>
+                  <input value={npePrix} onChange={ev=>setNpePrix(ev.target.value)} placeholder="€/m³" inputMode="decimal"
+                    style={{...S.input,width:90,textAlign:"right",fontSize:13}}/>
+                  <button type="button"
+                    disabled={!npeProd.trim()||!npeEss.trim()||!npePrix.trim()}
+                    onClick={()=>{ saveTarifPE(npeProd.trim(),npeEss.trim(),npePrix.trim()); setNpeProd(""); setNpeEss(""); setNpePrix(""); }}
+                    style={{padding:"9px 14px",fontSize:13,fontWeight:600,fontFamily:"inherit",borderRadius:7,cursor:"pointer",
+                      background:(npeProd.trim()&&npeEss.trim()&&npePrix.trim())?"#2D6A4F":"rgba(255,255,255,.04)",
+                      color:(npeProd.trim()&&npeEss.trim()&&npePrix.trim())?"#FFFFFF":"#8A9BB0",
+                      border:"1px solid rgba(255,255,255,.08)"}}>Ajouter</button>
+                </div>
+              </>;
+            })()}
+          </Card>
+
+          {/* ── Prix des options ── */}
+          <Card title="Prix des options (optionnel)">
+            <div style={{fontSize:12,color:"#8A9BB0",marginBottom:10}}>
+              Supplément ajouté au prix du produit quand l'option est cochée · Modifiable produit par produit
+            </div>
+            {OPTIONS.map(opt=>(
+              <div key={opt} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <span style={{flex:1,fontSize:13,color:"#E8ECEF",fontWeight:600}}>{opt}</span>
+                <input defaultValue={tarifsOpt[opt]||""} inputMode="decimal" placeholder="€"
+                  onBlur={ev=>saveTarifOpt(opt,ev.target.value)}
+                  style={{...S.input,width:100,textAlign:"right",fontSize:13}}/>
+                <span style={{fontSize:11,color:"#8A9BB0",width:30}}>€/m³</span>
+              </div>
+            ))}
+          </Card>
+
+
           {form.lignes.map((lg,i)=>(
             <Card key={i} title={`Produit ${form.lignes.length>1?i+1:""}`} accent={i===0?"rgba(212,168,83,.3)":"rgba(212,168,83,.12)"}>
               {/* Unité de mesure */}
@@ -1971,6 +2128,48 @@ export default function App(){
               </Row2>
               <Field label="Qualité" style={{marginBottom:10}}>
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
+              </Field>
+
+              {/* ── Options (apparaissent sur le bon de sciage, pas sur le devis) ── */}
+              <Field label="Options" style={{marginBottom:10}}>
+                <div style={{display:"flex",gap:5,marginBottom:6}}>
+                  {OPTIONS.map(opt=>{
+                    const on=(lg.options||[]).indexOf(opt)>=0;
+                    return <button key={opt} type="button" onClick={()=>toggleOption(i,opt)}
+                      style={{flex:1,padding:"7px 4px",fontSize:12,fontWeight:600,fontFamily:"inherit",borderRadius:6,cursor:"pointer",
+                        background:on?"#0A84FF":"rgba(255,255,255,.04)",color:on?"#FFFFFF":"#8A9BB0",
+                        border:on?"1px solid #0A84FF":"1px solid rgba(255,255,255,.08)"}}>
+                      {on?"✓ ":""}{opt}
+                    </button>;
+                  })}
+                </div>
+                {(lg.options||[]).length>0&&
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {(lg.options||[]).map(opt=>(
+                      <div key={opt} style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:12,color:"#8A9BB0",flex:1}}>Supplément {opt}</span>
+                        <input value={(lg.optionsPrix||{})[opt]||""} onChange={ev=>setOptionPrix(i,opt,ev.target.value)}
+                          placeholder={tarifsOpt[opt]?`Ex: ${tarifsOpt[opt]}`:"€"} inputMode="decimal"
+                          style={{...S.input,width:110,textAlign:"right",fontSize:13}}/>
+                        <span style={{fontSize:11,color:"#8A9BB0",width:34}}>€/{lg.typePrix||lg.unite||"m³"}</span>
+                      </div>
+                    ))}
+                  </div>}
+              </Field>
+
+              {/* ── Note produit : bon de sciage uniquement ── */}
+              <Field label="Note pour le scieur (n'apparaît pas sur le devis)" style={{marginBottom:10}}>
+                <textarea value={lg.note||""} onChange={sl(i,"note")} rows={2}
+                  placeholder="Ex : garder les plus belles planches pour la façade"
+                  style={{...S.input,width:"100%",resize:"vertical",
+                    color:lg.noteRouge?"#FF453A":"#E8ECEF",fontWeight:lg.noteRouge?700:400}}/>
+                <button type="button"
+                  onClick={()=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],noteRouge:!ls[i].noteRouge};return{...p,lignes:ls};})}
+                  style={{marginTop:6,padding:"6px 12px",fontSize:12,fontWeight:600,fontFamily:"inherit",borderRadius:6,cursor:"pointer",
+                    background:lg.noteRouge?"#FF453A":"rgba(255,255,255,.04)",color:lg.noteRouge?"#FFFFFF":"#8A9BB0",
+                    border:lg.noteRouge?"1px solid #FF453A":"1px solid rgba(255,255,255,.08)"}}>
+                  {lg.noteRouge?"🔴 Important (rouge et gras)":"Marquer comme important"}
+                </button>
               </Field>
               {/* Dimensions selon unité — toujours affichées */}
               {false?null:(
@@ -2238,7 +2437,10 @@ export default function App(){
                     i===0?form.clientId||"":"",
                     i===0?String(totalCommandeHT(form)):"",
                     i===0?form.telClient||"":"",
-                    i===0?form.interlocuteur||"":""
+                    i===0?form.interlocuteur||"":"",
+                    l.note||"",
+                    l.noteRouge?"1":"",
+                    JSON.stringify({o:l.options||[],p:l.optionsPrix||{}})
                   ]);
                   try{
                     await callScript(scriptUrl,{type:"commande",rows,id:bid});
