@@ -1449,6 +1449,9 @@ export default function App(){
   });
   const [newTarifEss,setNewTarifEss]=useState("");
   const [newTarifLibre,setNewTarifLibre]=useState(false);
+  // Bloc « Options et note » replié par ligne de produit (index → ouvert)
+  const [optOuvert,setOptOuvert]=useState({});
+  const basculeOpt=(i)=>setOptOuvert(p=>({...p,[i]:!p[i]}));
 
   // ── Tarifs par produit + essence (ex : Lambris en Épicéa = 700 €/m³) ──
   const [tarifsPE,setTarifsPE]=useState(()=>{
@@ -2130,7 +2133,25 @@ export default function App(){
                 <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
 
-              {/* ── Options (apparaissent sur le bon de sciage, pas sur le devis) ── */}
+              {/* ── Options + note, repliées derrière une flèche ── */}
+              {(()=>{
+                const ouvert=!!optOuvert[i];
+                const nbOpt=(lg.options||[]).length;
+                const aNote=!!String(lg.note||"").trim();
+                return <div style={{marginBottom:10}}>
+                  <button type="button" onClick={()=>basculeOpt(i)}
+                    style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"8px 10px",
+                      background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.08)",borderRadius:7,
+                      cursor:"pointer",fontFamily:"inherit",fontSize:12.5,fontWeight:600,color:"#8A9BB0",textAlign:"left"}}>
+                    <span style={{fontSize:11,color:"#8A9BB0",transition:"transform .15s",display:"inline-block",
+                      transform:ouvert?"rotate(90deg)":"none"}}>▶</span>
+                    <span style={{flex:1}}>Options et note</span>
+                    {nbOpt>0&&<span style={{fontSize:11,fontWeight:700,color:"#FFFFFF",background:"#0A84FF",
+                      borderRadius:20,padding:"1px 8px"}}>{(lg.options||[]).join(" · ")}</span>}
+                    {aNote&&<span style={{fontSize:12}}>{lg.noteRouge?"🔴":"📝"}</span>}
+                    {!ouvert&&nbOpt===0&&!aNote&&<span style={{fontSize:11,color:"#5A6472",fontWeight:500}}>sec, raboté, note…</span>}
+                  </button>
+                  {ouvert&&<div style={{marginTop:10}}>
               <Field label="Options" style={{marginBottom:10}}>
                 <div style={{display:"flex",gap:5,marginBottom:6}}>
                   {OPTIONS.map(opt=>{
@@ -2175,6 +2196,9 @@ export default function App(){
                   {lg.noteRouge?"🔴 Important (rouge et gras)":"Marquer comme important"}
                 </button>
               </Field>
+                  </div>}
+                </div>;
+              })()}
               {/* Dimensions selon unité — toujours affichées */}
               {false?null:(
                 (lg.unite==="m³"||lg.unite==="m³direct")?(
