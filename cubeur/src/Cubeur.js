@@ -7,7 +7,8 @@ const APPS_SCRIPT_URL_KEY = "cubeur_script_url";
 // ─── DONNÉES ──────────────────────────────────────────────────────────────────
 const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau","Lambris","Parquet","Lame de terrasse"];
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
-const QUALITES = ["Choix 1","Choix 2","Choix 3","Rebut","Non trié"];
+const QUALITES = ["Choix 1","Choix 2","Choix 3","Menuiserie","Hors cœur","Hors aubier","Rebut","Non trié"];
+const SEP_QUAL = " · ";   // les qualités se cumulent : "Choix 1 · Hors cœur"
 const UNITES   = ["m³","m²","mL"];
 const OPTIONS  = ["Sec","Raboté","Mouluré"];
 
@@ -310,7 +311,7 @@ async function imprimerCommande(cmd){
     doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...NOIR);
     doc.text((l.produit||"—").slice(0,16),cols.prod+1,y+4);
     doc.text((l.essence||"—").slice(0,10),cols.ess+1,y+4);
-    doc.text((l.qualite||"—").slice(0,9),cols.qual+1,y+4);
+    doc.text((qualiteCourt(l.qualite)||"—").slice(0,13),cols.qual+1,y+4);
 
     // Dimensions
     doc.setFont("helvetica","bold"); doc.setTextColor(...BRUN);
@@ -1830,6 +1831,42 @@ function tarifPEPour(tpe,prod,ess){
 function meilleurTarif(tarifs,tpe,prod,ess){
   return tarifPEPour(tpe,prod,ess) || tarifPour(tarifs,ess);
 }
+// Qualités cumulables : on coche ce qui s'applique au produit
+function SelQualites({value,onChange,opts}){
+  const choisies=String(value||"").split(/\s*·\s*/).map(x=>x.trim()).filter(Boolean);
+  const actif=(q)=>choisies.some(x=>normNom(x)===normNom(q));
+  const bascule=(q)=>{
+    const reste=choisies.filter(x=>normNom(x)!==normNom(q));
+    const suite=actif(q)?reste:[...choisies,q];
+    // on garde l'ordre de la liste de référence, les saisies libres à la fin
+    const ordonnees=[...opts.filter(o=>suite.some(x=>normNom(x)===normNom(o))),
+                     ...suite.filter(x=>!opts.some(o=>normNom(o)===normNom(x)))];
+    onChange({target:{value:ordonnees.join(SEP_QUAL)}});
+  };
+  const libres=choisies.filter(x=>!opts.some(o=>normNom(o)===normNom(x)));
+  return <div>
+    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+      {opts.map(q=>{
+        const on=actif(q);
+        return <button key={q} type="button" onClick={()=>bascule(q)}
+          style={{padding:"7px 11px",fontSize:12,fontWeight:600,fontFamily:"inherit",borderRadius:6,cursor:"pointer",
+            background:on?"#2D6A4F":"rgba(255,255,255,.04)",color:on?"#FFFFFF":"#8A9BB0",
+            border:on?"1px solid #2D6A4F":"1px solid rgba(255,255,255,.08)"}}>
+          {on?"✓ ":""}{q}
+        </button>;
+      })}
+    </div>
+    {libres.length>0&&<div style={{fontSize:11,color:"#8A9BB0",marginTop:6}}>
+      Aussi : {libres.join(", ")}
+      <button type="button" onClick={()=>onChange({target:{value:choisies.filter(x=>opts.some(o=>normNom(o)===normNom(x))).join(SEP_QUAL)}})}
+        style={{marginLeft:6,background:"transparent",border:"none",color:"#8A9BB0",cursor:"pointer"}}>✕</button>
+    </div>}
+    {choisies.length>1&&<div style={{fontSize:11,color:"#6dbf7e",marginTop:6,fontWeight:600}}>
+      {choisies.join(SEP_QUAL)}
+    </div>}
+  </div>;
+}
+
 function SelEssence({value,onChange,opts}){ return <SelProduit value={value} onChange={onChange} opts={opts} libreLabel="✏️ Essence libre…" librePh="Saisir l'essence à la main"/>; }
 function SelProduit({value,onChange,opts,libreLabel="✏️ Produit libre…",librePh="Saisir le produit à la main"}){
   const isLibre = value!=="" && !opts.includes(value);
@@ -1882,6 +1919,16 @@ function Empty({icon,text}){ return <div style={{textAlign:"center",padding:"50p
 function Spinner(){ return <div style={S.spinner}/>; }
 function Mini({label,value,color}){ return <div style={{textAlign:"center"}}><div style={{fontSize:9,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.04em",marginBottom:2}}>{label}</div><div style={{fontSize:12,fontWeight:600,color:color||"#E8ECEF"}}>{value}</div></div>; }
 function RItem({label,value,big,color}){ return <div><div style={{fontSize:10,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3,fontWeight:500}}>{label}</div><div style={{fontSize:big?18:14,fontWeight:big?700:600,color:color||"#E8ECEF"}}>{value}</div></div>; }
+
+// Qualités abrégées pour les colonnes étroites des PDF
+function qualiteCourt(q){
+  const abbr={"choix 1":"C1","choix 2":"C2","choix 3":"C3","menuiserie":"Menuis.",
+              "hors coeur":"H.cœur","hors cœur":"H.cœur","hors aubier":"H.aub",
+              "non trie":"N.trié","non trié":"N.trié","rebut":"Rebut"};
+  return String(q||"").split(/\s*·\s*|\s*\+\s*/).filter(Boolean)
+    .map(x=>abbr[x.trim().toLowerCase()]||abbr[normNom(x)]||x.trim())
+    .join("·");
+}
 
 // Affichage résumé dimensionnel selon unité
 function dimLabel(l){
@@ -2660,7 +2707,7 @@ export default function App(){
                 <Field label="Essence"><SelEssence value={lg.essence} onChange={sl(i,"essence")} opts={ESSENCES}/></Field>
               </Row2>
               <Field label="Qualité" style={{marginBottom:10}}>
-                <Sel value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
+                <SelQualites value={lg.qualite} onChange={sl(i,"qualite")} opts={QUALITES}/>
               </Field>
 
               {/* ── Options + note, repliées derrière une flèche ── */}
@@ -3567,7 +3614,7 @@ export default function App(){
               <Field label="Produit"><SelProduit value={freeForm.produit} onChange={sfree("produit")} opts={PRODUITS}/></Field>
               <Field label="Essence"><SelEssence value={freeForm.essence} onChange={sfree("essence")} opts={ESSENCES}/></Field>
             </Row2>
-            <Field label="Qualité"><Sel value={freeForm.qualite} onChange={sfree("qualite")} opts={QUALITES}/></Field>
+            <Field label="Qualité"><SelQualites value={freeForm.qualite} onChange={sfree("qualite")} opts={QUALITES}/></Field>
           </Card>
 
           <Card title={(freeForm.unite||"m³")==="m³"?"Dimensions":"Dimensions"}>
