@@ -1458,21 +1458,74 @@ async function fetchClientsCRM(){
 function SelClientCRM({value,clientId,clients,onPick}){
   const isLibre = value!=="" && !clientId;
   const [libreMode,setLibreMode]=useState(isLibre);
+  const [ouvert,setOuvert]=useState(false);
+  const [q,setQ]=useState("");
+  const boite=useRef(null);
   useEffect(()=>{ if(isLibre) setLibreMode(true); },[isLibre]);
-  const selVal = libreMode?"__libre__":(clientId||"");
-  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
-    <select style={S.select} value={selVal} onChange={e=>{
-      const v=e.target.value;
-      if(v==="__libre__"){ setLibreMode(true); onPick({id:"",nom:"",adresse:""}); }
-      else if(v===""){ setLibreMode(false); onPick({id:"",nom:"",adresse:""}); }
-      else { setLibreMode(false); const c=clients.find(x=>x.id===v); if(c) onPick(c); }
-    }}>
-      <option value="">— choisir un client —</option>
-      <option value="__libre__">✏️ Client libre (hors CRM)…</option>
-      {clientId&&!clients.some(c=>c.id===clientId)&&<option value={clientId}>{value}</option>}
-      {clients.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
-    </select>
-    {libreMode&&<input style={S.input} value={value} onChange={e=>onPick({id:"",nom:e.target.value,adresse:null})} placeholder="Nom du client"/>}
+  // Referme la liste quand on clique ailleurs
+  useEffect(()=>{
+    const dehors=(e)=>{ if(boite.current && !boite.current.contains(e.target)) setOuvert(false); };
+    document.addEventListener("mousedown",dehors);
+    return ()=>document.removeEventListener("mousedown",dehors);
+  },[]);
+  const rech=normNom(q);
+  const trouves = rech ? clients.filter(c=>normNom(c.nom).includes(rech)) : clients;
+  const choisir=(c)=>{ setLibreMode(false); setOuvert(false); setQ(""); onPick(c); };
+
+  return <div ref={boite} style={{position:"relative",display:"flex",flexDirection:"column",gap:6}}>
+    {!libreMode&&<>
+      <div onClick={()=>{ setOuvert(true); setQ(""); setTimeout(()=>{ const el=boite.current&&boite.current.querySelector("input[data-rech]"); el&&el.focus(); },30); }}
+        style={{...S.select,display:"flex",alignItems:"center",gap:8,cursor:"pointer",
+          color:value?"#E8ECEF":"#8A9BB0"}}>
+        <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+          {value||"— choisir un client —"}
+        </span>
+        <span style={{fontSize:11,color:"#8A9BB0"}}>🔍</span>
+      </div>
+      {ouvert&&<div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:40,marginTop:4,
+        background:"#272B2F",border:"1px solid rgba(255,255,255,.12)",borderRadius:9,
+        boxShadow:"0 12px 32px rgba(0,0,0,.45)",overflow:"hidden"}}>
+        <input data-rech autoFocus value={q} onChange={e=>setQ(e.target.value)}
+          placeholder="Taper le nom du client ou de l'entreprise…"
+          style={{...S.input,width:"100%",border:"none",borderRadius:0,
+            borderBottom:"1px solid rgba(255,255,255,.1)",background:"rgba(255,255,255,.03)"}}/>
+        <div style={{maxHeight:230,overflowY:"auto"}}>
+          <div onClick={()=>{ setLibreMode(true); setOuvert(false); setQ(""); onPick({id:"",nom:"",adresse:""}); }}
+            style={{padding:"10px 12px",cursor:"pointer",fontSize:13,color:"#C4904A",
+              borderBottom:"1px solid rgba(255,255,255,.06)"}}>
+            ✏️ Client libre (hors CRM)…
+          </div>
+          {trouves.length===0&&<div style={{padding:"14px 12px",fontSize:12.5,color:"#8A9BB0",textAlign:"center"}}>
+            Aucun client trouvé{q?" pour « "+q+" »":""}
+          </div>}
+          {trouves.map(c=>(
+            <div key={c.id} onClick={()=>choisir(c)}
+              style={{padding:"10px 12px",cursor:"pointer",fontSize:13.5,
+                color:c.id===clientId?"#34C759":"#E8ECEF",
+                background:c.id===clientId?"rgba(52,199,89,.08)":"transparent",
+                borderBottom:"1px solid rgba(255,255,255,.04)"}}>
+              <div style={{fontWeight:600}}>{c.nom}</div>
+              {(c.adresse||c.tel)&&<div style={{fontSize:11,color:"#8A9BB0",marginTop:1,
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {[String(c.adresse||"").replace(/\n/g," "),c.tel].filter(Boolean).join(" · ")}
+              </div>}
+            </div>
+          ))}
+        </div>
+        {clients.length>0&&<div style={{padding:"7px 12px",fontSize:10.5,color:"#5A6472",
+          borderTop:"1px solid rgba(255,255,255,.06)"}}>
+          {trouves.length} / {clients.length} client{clients.length>1?"s":""} du CRM
+        </div>}
+      </div>}
+    </>}
+    {libreMode&&<div style={{display:"flex",gap:6}}>
+      <input style={{...S.input,flex:1}} value={value} autoFocus
+        onChange={e=>onPick({id:"",nom:e.target.value,adresse:null})} placeholder="Nom du client"/>
+      <button type="button" title="Revenir à la liste du CRM"
+        onClick={()=>{ setLibreMode(false); setQ(""); onPick({id:"",nom:"",adresse:""}); }}
+        style={{background:"transparent",border:"1px solid rgba(255,255,255,.1)",borderRadius:7,
+          color:"#8A9BB0",cursor:"pointer",fontSize:14,padding:"0 12px"}}>↺</button>
+    </div>}
   </div>;
 }
 
@@ -1663,6 +1716,26 @@ function prixConseille(commandes, l){
     if(lot.length>=2){ const st=statsLot(lot); return { ...st, base, critere:niv.lbl, prix:st.med }; }
   }
   return null;
+}
+
+// Sauvegarde complète : toutes les tables dans un fichier JSON
+async function sauvegardeComplete(){
+  const sb=await getSupabase();
+  const tables=["commandes","scieur","historique"];
+  const dump={ application:"Cubeur – Exploitation Verdon", date:new Date().toISOString(), tables:{} };
+  for(const t of tables){
+    const {data,error}=await sb.from(t).select("*");
+    if(error) throw new Error(t+" : "+error.message);
+    dump.tables[t]=data||[];
+  }
+  dump.resume=tables.map(t=>t+" : "+dump.tables[t].length+" ligne(s)").join(" · ");
+  const blob=new Blob([JSON.stringify(dump,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="Sauvegarde_Cubeur_"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  return dump.resume;
 }
 
 // Export du récapitulatif des prix au format CSV (s'ouvre dans Excel)
@@ -1942,6 +2015,8 @@ export default function App(){
   const [histDetail,setHistDetail]=useState(null); // commande ouverte en détail
   const [histSearch,setHistSearch]=useState("");
   const [cmdSearch,setCmdSearch]=useState("");
+  const [sauvEnCours,setSauvEnCours]=useState(false);
+  const [derniereSauv,setDerniereSauv]=useState(()=>{ try{ return localStorage.getItem("cubeur_derniere_sauv")||""; }catch(e){ return ""; } });
   const [devisPU,setDevisPU]=useState(()=>{ try{ return localStorage.getItem("cubeur_devis_pu")!=="0"; }catch(e){ return true; } });
   // Filtre par nom de client, chantier ou numéro de commande
   const filtreCmd=(arr)=>{
@@ -3581,6 +3656,25 @@ export default function App(){
             <div style={{fontSize:13,color:"#E8ECEF",marginBottom:6}}>✓ Connecté : <strong style={{color:"#34C759"}}>{session.user?.email}</strong></div>
             <div style={{fontSize:12,color:"#8A9BB0",lineHeight:1.6,marginBottom:12}}>Les commandes, cubages et l'historique sont enregistrés dans Supabase et partagés entre tous les comptes de l'équipe.</div>
             <button style={S.btnSmall} onClick={deconnexion}>Se déconnecter</button>
+            <div style={{borderTop:"1px solid rgba(255,255,255,.07)",marginTop:14,paddingTop:14}}>
+              <div style={{fontSize:13,color:"#E8ECEF",fontWeight:600,marginBottom:4}}>Sauvegarde des données</div>
+              <div style={{fontSize:11.5,color:"#8A9BB0",lineHeight:1.55,marginBottom:10}}>
+                L'offre gratuite de Supabase ne permet pas de restaurer soi-même une sauvegarde.
+                Télécharge ce fichier de temps en temps (une fois par mois par exemple) et garde-le de côté :
+                il contient toutes les commandes, cubages et l'historique.
+              </div>
+              <button style={{...S.btnSmall,width:"100%",padding:"10px"}} disabled={sauvEnCours}
+                onClick={async()=>{ setSauvEnCours(true);
+                  try{ const r=await sauvegardeComplete();
+                    const q=new Date().toLocaleDateString("fr-FR")+" — "+r;
+                    setDerniereSauv(q); localStorage.setItem("cubeur_derniere_sauv",q);
+                    showToast("Sauvegarde téléchargée ✓"); }
+                  catch(e){ showToast("Erreur sauvegarde : "+e.message,"error"); }
+                  setSauvEnCours(false); }}>
+                {sauvEnCours?"Préparation…":"⬇ Télécharger une sauvegarde complète"}
+              </button>
+              {derniereSauv&&<div style={{fontSize:11,color:"#6dbf7e",marginTop:8}}>Dernière sauvegarde : {derniereSauv}</div>}
+            </div>
           </Card>
           {/* ── Analyse des prix pratiqués ── */}
           <Card title="Présentation des devis">
