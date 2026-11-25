@@ -580,7 +580,11 @@ async function genererDevisPDF(form, cmdId){
   }
 
   // ── TABLEAU ──
-  const CL = { prod:14, qte:96, pu:128, tva:160, total:196 };
+  // Le prix unitaire peut être masqué (réglage dans ⚙ Config)
+  let montrerPU = true;
+  try{ montrerPU = localStorage.getItem("cubeur_devis_pu")!=="0"; }catch(e){}
+  const CL = montrerPU ? { prod:14, qte:96, pu:128, tva:160, total:196 }
+                       : { prod:14, qte:112, pu:152, tva:152, total:196 };
 
   // En-tête
   doc.setFillColor(240,236,228);
@@ -590,7 +594,7 @@ async function genererDevisPDF(form, cmdId){
   doc.setTextColor(...NOIR);
   doc.text("Produits", CL.prod+1, y+5);
   doc.text("Qté", (CL.qte+CL.pu)/2, y+5, {align:"center"});
-  doc.text("Prix u. HT", (CL.pu+CL.tva)/2, y+5, {align:"center"});
+  if(montrerPU) doc.text("Prix u. HT", (CL.pu+CL.tva)/2, y+5, {align:"center"});
   doc.text("TVA (%)", (CL.tva+CL.total)/2-4, y+5, {align:"center"});
   doc.text("Total HT", CL.total, y+5, {align:"right"});
   y += 7;
@@ -633,7 +637,7 @@ async function genererDevisPDF(form, cmdId){
       doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...NOIR);
       doc.text("Produits", CL.prod+1, y+5);
       doc.text("Qté", (CL.qte+CL.pu)/2, y+5, {align:"center"});
-      doc.text("Prix u. HT", (CL.pu+CL.tva)/2, y+5, {align:"center"});
+      if(montrerPU) doc.text("Prix u. HT", (CL.pu+CL.tva)/2, y+5, {align:"center"});
       doc.text("TVA (%)", (CL.tva+CL.total)/2-4, y+5, {align:"center"});
       doc.text("Total HT", CL.total, y+5, {align:"right"});
       y += 7;
@@ -645,9 +649,9 @@ async function genererDevisPDF(form, cmdId){
     doc.setFont("helvetica","normal");
     doc.setFontSize(8.5);
     doc.setTextColor(...NOIR);
-    doc.text(desig.slice(0,32), CL.prod+1, y+5.5);
+    doc.text(desig.slice(0, montrerPU?32:46), CL.prod+1, y+5.5);
     doc.text(qteStr, (CL.qte+CL.pu)/2, y+5.5, {align:"center"});
-    if(puNum>0) doc.text(`${fmtNum(puNum)} €`, (CL.pu+CL.tva)/2, y+5.5, {align:"center"});
+    if(montrerPU && puNum>0) doc.text(`${fmtNum(puNum)} €`, (CL.pu+CL.tva)/2, y+5.5, {align:"center"});
     doc.text("20%", (CL.tva+CL.total)/2-4, y+5.5, {align:"center"});
     if(htVal!=null){
       totalHT += htVal;
@@ -1549,6 +1553,201 @@ function tarifPour(tarifs, essence){
 // Clé d'un tarif « produit + essence » (insensible aux accents/majuscules)
 function clePE(prod,ess){ return normNom(prod)+"|"+normNom(ess); }
 // Prix pour un couple produit+essence (ex : Lambris + Épicéa)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// APPRENTISSAGE DES PRIX
+// Analyse les prix saisis à la main dans les commandes passées et en déduit
+// un prix conseillé selon le produit, l'essence, la qualité et l'épaisseur.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Classe d'épaisseur (le prix au m³ dépend beaucoup du débit)
+function classeEp(ep){
+  const e=pf(ep);
+  if(!e||e<=0) return "?";
+  if(e<=27) return "≤27";
+  if(e<=50) return "28-50";
+  if(e<=100) return "51-100";
+  return ">100";
+}
+// Classe de section (petite ou grosse pièce) à partir de ép × larg
+function classeSection(ep,la){
+  const e=pf(ep), l=pf(la);
+  if(!e||!l||e<=0||l<=0) return "?";
+  const cm2=(e*l)/100;            // mm² → cm²
+  if(cm2<=50)  return "petite";    // ex. 18×200, 27×150
+  if(cm2<=150) return "moyenne";   // ex. 50×200, 63×150
+  if(cm2<=400) return "grosse";    // ex. 150×150
+  return "très grosse";
+}
+// Classe de longueur
+function classeLong(lo){
+  const l=pf(lo);
+  if(!l||l<=0) return "?";
+  if(l<=2.5) return "≤2,5 m";
+  if(l<=4)   return "2,5-4 m";
+  if(l<=6)   return "4-6 m";
+  return ">6 m";
+}
+// Classe de volume de la ligne (effet quantité)
+function classeVolume(l){
+  const v=volLigneM3(l);
+  if(v==null||v<=0) return "?";
+  if(v<1)  return "<1 m³";
+  if(v<5)  return "1-5 m³";
+  if(v<15) return "5-15 m³";
+  return ">15 m³";
+}
+// Base de tarification réellement utilisée (m³direct compte comme m³)
+function baseTarif(l){
+  const t=l.typePrix||l.unite||"m³";
+  return t==="m³direct"?"m³":t;
+}
+// Prix HT de base d'une ligne, hors suppléments d'options
+function prixBaseHT(l){
+  let p=pf(l.prixUnitaire)||0;
+  if(p<=0) return null;
+  if((l.typeTaxe||"HT")==="TTC") p=round(p/1.2,4);
+  return round(p,2);
+}
+// Toutes les lignes tarifées des commandes passées
+function echantillons(commandes){
+  const out=[];
+  (commandes||[]).forEach(c=>{
+    (c.lignes||[]).forEach(l=>{
+      const p=prixBaseHT(l);
+      if(p==null) return;
+      out.push({ prix:p, base:baseTarif(l), produit:l.produit||"", essence:l.essence||"",
+                 qualite:l.qualite||"", ep:classeEp(l.epaisseur), sect:classeSection(l.epaisseur,l.largeur),
+                 lon:classeLong(l.longueur), vol:classeVolume(l), date:c.dateCreation||"" });
+    });
+  });
+  return out;
+}
+const mediane=(arr)=>{
+  if(!arr.length) return null;
+  const t=arr.slice().sort((a,b)=>a-b), m=Math.floor(t.length/2);
+  return t.length%2 ? t[m] : round((t[m-1]+t[m])/2,2);
+};
+const moyenne=(arr)=>arr.length?round(arr.reduce((a,b)=>a+b,0)/arr.length,2):null;
+
+// Statistiques d'un sous-ensemble de lignes
+function statsLot(lot){
+  const px=lot.map(x=>x.prix);
+  return { n:lot.length, med:mediane(px), moy:moyenne(px), min:Math.min(...px), max:Math.max(...px) };
+}
+
+// Prix conseillé : du critère le plus précis au plus large, 2 lignes minimum
+function prixConseille(commandes, l){
+  const ech=echantillons(commandes);
+  if(!ech.length) return null;
+  const base=baseTarif(l);
+  const prod=normNom(l.produit), ess=normNom(l.essence), qual=normNom(l.qualite), ep=classeEp(l.epaisseur);
+  const sect=classeSection(l.epaisseur,l.largeur), lon=classeLong(l.longueur), vol=classeVolume(l);
+  const memeBase=ech.filter(x=>x.base===base);
+  const niveaux=[
+    { lbl:"produit + essence + qualité + section + longueur", f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&normNom(x.qualite)===qual&&x.sect===sect&&x.lon===lon, need:prod&&ess&&qual&&sect!=="?"&&lon!=="?" },
+    { lbl:"produit + essence + section + longueur",  f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&x.sect===sect&&x.lon===lon, need:prod&&ess&&sect!=="?"&&lon!=="?" },
+    { lbl:"produit + essence + qualité + section",   f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&normNom(x.qualite)===qual&&x.sect===sect, need:prod&&ess&&qual&&sect!=="?" },
+    { lbl:"produit + essence + section",             f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&x.sect===sect, need:prod&&ess&&sect!=="?" },
+    { lbl:"produit + essence + qualité + épaisseur", f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&normNom(x.qualite)===qual&&x.ep===ep, need:prod&&ess&&qual&&ep!=="?" },
+    { lbl:"produit + essence + épaisseur",           f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&x.ep===ep, need:prod&&ess&&ep!=="?" },
+    { lbl:"produit + essence + qualité",             f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess&&normNom(x.qualite)===qual, need:prod&&ess&&qual },
+    { lbl:"produit + essence",                       f:x=>normNom(x.produit)===prod&&normNom(x.essence)===ess, need:prod&&ess },
+    { lbl:"essence + qualité",                       f:x=>normNom(x.essence)===ess&&normNom(x.qualite)===qual, need:ess&&qual },
+    { lbl:"essence",                                 f:x=>normNom(x.essence)===ess, need:ess },
+    { lbl:"produit",                                 f:x=>normNom(x.produit)===prod, need:prod }
+  ];
+  for(const niv of niveaux){
+    if(!niv.need) continue;
+    const lot=memeBase.filter(niv.f);
+    if(lot.length>=2){ const st=statsLot(lot); return { ...st, base, critere:niv.lbl, prix:st.med }; }
+  }
+  return null;
+}
+
+// Export du récapitulatif des prix au format CSV (s'ouvre dans Excel)
+function exportPrixCSV(commandes){
+  const sep=";";
+  const nb=(n)=>n==null?"":String(n).replace(".",",");   // Excel français
+  const txt=(v)=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+  const lignes=[];
+  lignes.push(txt("RÉCAPITULATIF DES PRIX PRATIQUÉS"));
+  lignes.push(txt("Export du "+new Date().toLocaleDateString("fr-FR")+" — Exploitation Verdon"));
+  lignes.push("");
+
+  ["m³","m²","mL"].forEach(base=>{
+    const an=analysePrix(commandes,base);
+    if(!an) return;
+    lignes.push(txt("BASE "+base));
+    lignes.push([txt("Prix médian global"),nb(an.globale.med),txt("€/"+base+" HT"),
+                 txt(an.globale.n+" lignes"),txt("de "+an.globale.min+" à "+an.globale.max+" €"),
+                 txt("moyenne "+nb(an.globale.moy)+" €")].join(sep));
+    lignes.push("");
+    const bloc=(titre,rows)=>{
+      if(!rows||!rows.length) return;
+      lignes.push(txt(titre));
+      lignes.push([txt("Critère"),txt("Nb lignes"),txt("Médiane"),txt("Moyenne"),txt("Mini"),txt("Maxi"),txt("Écart vs médiane globale %")].join(sep));
+      rows.forEach(r=>lignes.push([txt(r.cle),r.n,nb(r.med),nb(r.moy),nb(r.min),nb(r.max),r.ecart].join(sep)));
+      lignes.push("");
+    };
+    bloc("Par essence",an.essence);
+    bloc("Par produit (type de débit)",an.produit);
+    bloc("Par qualité",an.qualite);
+    bloc("Par épaisseur",an.epaisseur);
+    bloc("Par section de pièce",an.section);
+    bloc("Par longueur",an.longueur);
+    bloc("Par volume de la ligne (effet quantité)",an.volume);
+  });
+
+  lignes.push(txt("DÉTAIL DE TOUTES LES LIGNES CHIFFRÉES"));
+  lignes.push([txt("Commande"),txt("Date"),txt("Client"),txt("Chantier"),txt("Produit"),txt("Essence"),
+               txt("Qualité"),txt("Ép. mm"),txt("Larg. mm"),txt("Long. m"),txt("Quantité"),txt("Unité"),
+               txt("Base prix"),txt("Prix HT unitaire"),txt("Options"),txt("Supplément options"),
+               txt("Volume m³"),txt("Total HT")].join(sep));
+  (commandes||[]).forEach(c=>{
+    (c.lignes||[]).forEach(l=>{
+      const pHT=prixBaseHT(l); if(pHT==null) return;
+      const ht=ligneHT(l);
+      const htFinal=ht!=null?((l.typeTaxe||"HT")==="TTC"?round(ht/1.2,2):round(ht,2)):null;
+      lignes.push([txt(c.id),txt(c.dateCreation||""),txt(c.client||""),txt(c.chantier||""),
+        txt(l.produit||""),txt(l.essence||""),txt(l.qualite||""),txt(l.epaisseur||""),txt(l.largeur||""),
+        txt(l.longueur||""),txt(l.quantite||""),txt(l.unite||"m³"),txt(baseTarif(l)),nb(pHT),
+        txt((l.options||[]).join(" + ")),nb(round(optionsSupp(l),2)),nb(volLigneM3(l)),nb(htFinal)].join(sep));
+    });
+  });
+
+  const contenu="\uFEFF"+lignes.join("\r\n");   // BOM pour les accents dans Excel
+  const blob=new Blob([contenu],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="Prix_pratiques_Verdon_"+new Date().toISOString().slice(0,10)+".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+// Volume total d'une commande, en m³
+function volCommande(c){
+  return round((c.lignes||[]).reduce((t,l)=>{ const v=volLigneM3(l); return t+(v||0); },0),3);
+}
+
+// Influence de chaque facteur sur le prix (pour le tableau d'analyse)
+function analysePrix(commandes, base){
+  const ech=echantillons(commandes).filter(x=>x.base===base);
+  if(ech.length<2) return null;
+  const globale=statsLot(ech);
+  const parFacteur=(champ)=>{
+    const map={};
+    ech.forEach(x=>{ const k=(x[champ]||"").trim(); if(!k) return; (map[k]=map[k]||[]).push(x); });
+    return Object.keys(map).map(k=>{
+      const st=statsLot(map[k]);
+      return { cle:k, ...st, ecart: globale.med? round((st.med/globale.med-1)*100,0) : 0 };
+    }).filter(r=>r.n>=2).sort((a,b)=>b.med-a.med);
+  };
+  return { base, globale, essence:parFacteur("essence"), produit:parFacteur("produit"),
+           qualite:parFacteur("qualite"), epaisseur:parFacteur("ep"),
+           section:parFacteur("sect"), longueur:parFacteur("lon"), volume:parFacteur("vol") };
+}
+
 function tarifPEPour(tpe,prod,ess){
   if(!prod||!ess) return "";
   const v=tpe[clePE(prod,ess)];
@@ -1742,6 +1941,15 @@ export default function App(){
   const [histLoading,setHistLoading]=useState(false);
   const [histDetail,setHistDetail]=useState(null); // commande ouverte en détail
   const [histSearch,setHistSearch]=useState("");
+  const [cmdSearch,setCmdSearch]=useState("");
+  const [devisPU,setDevisPU]=useState(()=>{ try{ return localStorage.getItem("cubeur_devis_pu")!=="0"; }catch(e){ return true; } });
+  // Filtre par nom de client, chantier ou numéro de commande
+  const filtreCmd=(arr)=>{
+    const q=cmdSearch.trim().toLowerCase();
+    if(!q) return arr;
+    return arr.filter(c=>[c.client,c.chantier,c.id,c.telClient,c.interlocuteur]
+      .some(v=>String(v||"").toLowerCase().includes(q)));
+  };
   const [histLimit,setHistLimit]=useState(20);
   const [showRefus,setShowRefus]=useState(false);
 
@@ -1778,7 +1986,15 @@ export default function App(){
     setHistLoading(false);
   },[scriptUrl]);
 
-  useEffect(()=>{ load(); poll.current=setInterval(()=>load(true),30000); return()=>clearInterval(poll.current); },[load]);
+  // Rafraîchissement auto : toutes les 30 s, mais uniquement quand l'app est visible
+  // (sur téléphone en veille ou onglet en arrière-plan, rien ne tourne)
+  useEffect(()=>{
+    const demarrer=()=>{ clearInterval(poll.current); poll.current=setInterval(()=>{ if(!document.hidden) load(true); },30000); };
+    load(); demarrer();
+    const surVisibilite=()=>{ if(!document.hidden){ load(true); demarrer(); } else clearInterval(poll.current); };
+    document.addEventListener("visibilitychange",surVisibilite);
+    return()=>{ clearInterval(poll.current); document.removeEventListener("visibilitychange",surVisibilite); };
+  },[load]);
 
   const migrer=async()=>{
     const url=oldUrl.trim();
@@ -1831,15 +2047,24 @@ export default function App(){
     setForm(p=>{
       const ls=[...p.lignes];
       ls[i]={...ls[i],[f]:val};
-      // Auto-remplir le prix quand on change le produit ou l'essence
-      if(f==="essence"||f==="produit"){
-        const prev=p.lignes[i];
-        const prod=f==="produit"?val:prev.produit, ess=f==="essence"?val:prev.essence;
-        const t=meilleurTarif(tarifs,tarifsPE,prod,ess);
-        // on remplit si le prix est vide ou s'il venait du tarif précédent
-        const ancien=meilleurTarif(tarifs,tarifsPE,prev.produit,prev.essence);
-        const venaitDuTarif=prev.prixUnitaire&&prev.prixUnitaire===ancien;
-        if(t&&(!prev.prixUnitaire||prev.prixUnitaire==="0"||venaitDuTarif)) ls[i]={...ls[i],prixUnitaire:t};
+      // Auto-remplir le prix : tarif déclaré en priorité, sinon moyenne des devis passés
+      if(f==="essence"||f==="produit"||f==="qualite"||f==="epaisseur"){
+        const prev=p.lignes[i], suiv=ls[i];
+        const tarifNouveau=meilleurTarif(tarifs,tarifsPE,suiv.produit,suiv.essence);
+        const tarifAncien =meilleurTarif(tarifs,tarifsPE,prev.produit,prev.essence);
+        const consAncien  =prixConseille(commandes,prev);
+        // on ne remplace jamais un prix tapé à la main
+        const auto = !prev.prixUnitaire || prev.prixUnitaire==="0"
+          || prev.prixUnitaire===tarifAncien
+          || (consAncien && prev.prixUnitaire===String(consAncien.prix));
+        if(auto){
+          if(tarifNouveau) ls[i]={...ls[i],prixUnitaire:tarifNouveau};
+          else {
+            const cons=prixConseille(commandes,suiv);
+            if(cons) ls[i]={...ls[i],prixUnitaire:String(cons.prix)};
+            else if(prev.prixUnitaire===tarifAncien||(consAncien&&prev.prixUnitaire===String(consAncien.prix))) ls[i]={...ls[i],prixUnitaire:""};
+          }
+        }
       }
       return{...p,lignes:ls};
     });
@@ -2127,7 +2352,10 @@ export default function App(){
           <div style={{width:8,height:8,borderRadius:"50%",background:"#34C759",boxShadow:"0 0 8px rgba(52,199,89,.6)"}}/>
           <span style={S.logoText}>SCIERIE</span>
         </div>
-        {cmdAtt.length>0&&<div style={S.alertBadge}>{cmdAtt.length} en attente</div>}
+        {cmdAtt.length>0&&<div style={S.alertBadge}>
+          {cmdAtt.length} en attente
+          {(()=>{ const v=round(cmdAtt.reduce((t,c)=>t+volCommande(c),0),2); return v>0?" · "+v+" m³":""; })()}
+        </div>}
       </header>
 
       <main style={S.main}>
@@ -2493,6 +2721,29 @@ export default function App(){
                 <Num value={lg.prixUnitaire||""} onChange={sl(i,"prixUnitaire")} ph={`Ex: ${(lg.typeTaxe||"HT")==="TTC"?"660":"550"} €/${lg.typePrix||lg.unite||"m³"} (${lg.typeTaxe||"HT"})`}/>
               </div>
 
+              {/* Prix conseillé, calculé sur les devis déjà faits */}
+              {(()=>{
+                const cons=prixConseille(commandes,lg);
+                if(!cons) return null;
+                const actuel=pf(lg.prixUnitaire)||0;
+                const pareil=actuel>0&&Math.abs(actuel-cons.prix)<0.5;
+                const ecart=actuel>0&&cons.prix>0?Math.round((actuel/cons.prix-1)*100):0;
+                return <div style={{marginTop:8,background:"rgba(155,89,247,.07)",border:"1px solid rgba(155,89,247,.25)",borderRadius:8,padding:"9px 11px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontSize:11,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:.3}}>Prix conseillé</span>
+                    <span style={{fontSize:15,fontWeight:700,color:"#9B59F7"}}>{cons.prix} €/{cons.base}</span>
+                    {!pareil&&<button type="button" onClick={()=>setForm(p=>{const ls=[...p.lignes];ls[i]={...ls[i],prixUnitaire:String(cons.prix)};return{...p,lignes:ls};})}
+                      style={{marginLeft:"auto",padding:"5px 11px",fontSize:12,fontWeight:600,fontFamily:"inherit",borderRadius:6,cursor:"pointer",
+                        background:"#9B59F7",color:"#fff",border:"none"}}>Appliquer</button>}
+                    {pareil&&<span style={{marginLeft:"auto",fontSize:11,color:"#6dbf7e",fontWeight:600}}>✓ appliqué</span>}
+                  </div>
+                  <div style={{fontSize:11,color:"#8A9BB0",marginTop:4}}>
+                    Médiane de {cons.n} ligne{cons.n>1?"s":""} ({cons.critere}) · de {cons.min} à {cons.max} €
+                    {actuel>0&&!pareil&&<span style={{color:ecart>0?"#6dbf7e":"#FF9F0A"}}> · ton prix : {ecart>0?"+":""}{ecart} %</span>}
+                  </div>
+                </div>;
+              })()}
+
               {/* Prix réellement appliqué = prix saisi + suppléments des options */}
               {(()=>{
                 const sup=optionsSupp(lg);
@@ -2801,8 +3052,20 @@ export default function App(){
                 </Card>
               ))}
             </>}
+{(() => {
+              const total = cmdActives.length + cmdRefusees.length;
+              if(total<2 && !cmdSearch) return null;
+              return <div style={{position:"relative",marginBottom:12}}>
+                <input value={cmdSearch} onChange={e=>setCmdSearch(e.target.value)}
+                  placeholder="🔍 Rechercher un client, un chantier, un n°…"
+                  style={{...S.input,width:"100%",paddingRight:cmdSearch?34:11}}/>
+                {cmdSearch&&<button type="button" onClick={()=>setCmdSearch("")}
+                  style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"transparent",
+                    border:"none",color:"#8A9BB0",cursor:"pointer",fontSize:15}}>✕</button>}
+              </div>;
+            })()}
             {cmdActives.length>0&&<div style={{fontSize:10,fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"#8A9BB0",margin:"20px 0 10px",paddingBottom:5,borderBottom:"1px solid rgba(255,255,255,.07)"}}>Commandes envoyées</div>}
-            {cmdActives.map(c=>(
+            {filtreCmd(cmdActives).map(c=>(
               <Card key={c.id}>
                 {confirmDel===c.id?(
                   <div style={{textAlign:"center",padding:"8px 0"}}>
@@ -2816,7 +3079,10 @@ export default function App(){
                   <>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                       <div><div style={{fontSize:11,color:"#8A9BB0",fontWeight:500}}>{c.id}</div><div style={{fontWeight:600,color:"#E8ECEF",fontSize:15}}>{c.client}</div>{c.chantier&&<div style={{fontSize:12,color:"#8A9BB0",fontStyle:"italic"}}>🏗 {c.chantier}</div>}</div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}><Badge status={c.statut||"attente"}/><button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button></div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        {(()=>{ const v=volCommande(c); return v>0?<span style={{fontSize:11,fontWeight:700,color:"#5bb8d4",
+                          background:"rgba(91,184,212,.1)",borderRadius:5,padding:"2px 7px",whiteSpace:"nowrap"}}>{v} m³</span>:null; })()}
+                        <Badge status={c.statut||"attente"}/><button style={{...S.btnDel,padding:"4px 8px",fontSize:12}} onClick={()=>setConfirmDel(c.id)}>🗑</button></div>
                     </div>
                     {(c.lignes||[]).map((l,i)=>(
                       <div key={i} style={{fontSize:12,color:"#a09080",marginBottom:2}}>
@@ -2888,7 +3154,7 @@ export default function App(){
             {cmdVal.length>0&&<div style={{fontSize:12,color:"#8A9BB0",textAlign:"center",margin:"12px 0",cursor:"pointer"}} onClick={()=>{setTab("historique");if(histCmds.length===0)loadHist();}}>✓ {cmdVal.length} commande{cmdVal.length>1?"s":""} terminée{cmdVal.length>1?"s":""} — <span style={{color:"#34C759",textDecoration:"underline"}}>voir l'Historique</span></div>}
             {cmdRefusees.length>0&&<>
               <button style={{...S.btnRefresh,width:"100%",marginTop:8}} onClick={()=>setShowRefus(v=>!v)}>{showRefus?"▾":"▸"} Devis refusés ({cmdRefusees.length})</button>
-              {showRefus&&cmdRefusees.map(c=>(
+              {showRefus&&filtreCmd(cmdRefusees).map(c=>(
                 <Card key={c.id} style={{opacity:.75,marginTop:8}}>
                   {confirmDel===c.id?(
                     <div style={{textAlign:"center",padding:"8px 0"}}>
@@ -2917,16 +3183,26 @@ export default function App(){
 
         {/* ══ À RÉALISER ══ */}
         {tab==="arealiser"&&<div style={S.page}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:14}}>
             <Stat label="Attente" value={cmdAtt.length} color="#34C759"/>
             <Stat label="Prod." value={cmdProd.length} color="#5bb8d4"/>
             <Stat label="Validées" value={cmdVal.length} color="#6dbf7e"/>
+            <Stat label="m³ à scier" value={round(aRealiser.reduce((t,c)=>t+volCommande(c),0),2)} color="#C4904A"/>
           </div>
+          {(aRealiser.length>1||cmdSearch)&&<div style={{position:"relative",marginBottom:12}}>
+            <input value={cmdSearch} onChange={e=>setCmdSearch(e.target.value)}
+              placeholder="🔍 Rechercher un client, un chantier, un n°…"
+              style={{...S.input,width:"100%",paddingRight:cmdSearch?34:11}}/>
+            {cmdSearch&&<button type="button" onClick={()=>setCmdSearch("")}
+              style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"transparent",
+                border:"none",color:"#8A9BB0",cursor:"pointer",fontSize:15}}>✕</button>}
+          </div>}
           <button style={S.btnRefresh} onClick={()=>load()}>{loading?"⏳ Chargement...":"↻ Actualiser"}</button>
           {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Non connecté à la base de données</div>}
           {aRealiser.length===0&&scriptUrl&&!loading&&<Empty icon="✅" text="Aucune commande à réaliser"/>}
 
-          {aRealiser.map(cmd=>{
+          {cmdSearch&&filtreCmd(aRealiser).length===0&&<Empty icon="🔍" text="Aucun résultat"/>}
+          {filtreCmd(aRealiser).map(cmd=>{
             const cubeCmd=cube[cmd.id];
             const pids=cubeCmd?Object.keys(cubeCmd):[];
             const nbExp=pids.filter(pid=>cubeCmd[pid].exported).length;
@@ -3306,6 +3582,87 @@ export default function App(){
             <div style={{fontSize:12,color:"#8A9BB0",lineHeight:1.6,marginBottom:12}}>Les commandes, cubages et l'historique sont enregistrés dans Supabase et partagés entre tous les comptes de l'équipe.</div>
             <button style={S.btnSmall} onClick={deconnexion}>Se déconnecter</button>
           </Card>
+          {/* ── Analyse des prix pratiqués ── */}
+          <Card title="Présentation des devis">
+            {(()=>{
+              const on=devisPU;
+              return <>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13.5,color:"#E8ECEF",fontWeight:600}}>Afficher le prix unitaire sur le devis</div>
+                    <div style={{fontSize:11.5,color:"#8A9BB0",marginTop:3,lineHeight:1.5}}>
+                      Colonne « Prix u. HT » (€/m³, €/m²…). Désactivée, le devis ne montre que la quantité et le total par ligne.
+                    </div>
+                  </div>
+                  <button type="button" onClick={()=>{ const v=!on; setDevisPU(v); localStorage.setItem("cubeur_devis_pu", v?"1":"0"); }}
+                    style={{flex:"0 0 auto",padding:"8px 14px",fontSize:12.5,fontWeight:700,fontFamily:"inherit",borderRadius:7,cursor:"pointer",
+                      background:on?"rgba(52,199,89,.14)":"rgba(255,255,255,.04)",
+                      color:on?"#34C759":"#8A9BB0",
+                      border:on?"1px solid rgba(52,199,89,.4)":"1px solid rgba(255,255,255,.1)"}}>
+                    {on?"✓ Affiché":"Masqué"}
+                  </button>
+                </div>
+              </>;
+            })()}
+          </Card>
+
+          <Card title="Analyse des prix pratiqués">
+            {(()=>{
+              const an=analysePrix(commandes,"m³");
+              if(!an) return <div style={{fontSize:12.5,color:"#8A9BB0",lineHeight:1.7}}>
+                Pas encore assez de devis chiffrés. Dès que plusieurs commandes auront un prix au m³,
+                l'application calculera ici les moyennes par essence, produit, qualité et épaisseur,
+                et proposera automatiquement un prix sur chaque produit.
+              </div>;
+              const bloc=(titre,lignes,unite)=>{
+                if(!lignes.length) return null;
+                return <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:.4,fontWeight:700,marginBottom:6}}>{titre}</div>
+                  {lignes.map(r=>(
+                    <div key={r.cle} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,.05)"}}>
+                      <span style={{flex:1,fontSize:13,color:"#E8ECEF",fontWeight:600}}>{r.cle}{unite||""}</span>
+                      <span style={{fontSize:11,color:"#5A6472",width:52,textAlign:"right"}}>{r.n} lig.</span>
+                      <span style={{fontSize:11,color:"#5A6472",width:86,textAlign:"right"}}>{r.min}–{r.max} €</span>
+                      <span style={{fontSize:13.5,fontWeight:700,color:"#E8ECEF",width:74,textAlign:"right"}}>{r.med} €</span>
+                      <span style={{fontSize:11,fontWeight:700,width:52,textAlign:"right",
+                        color:r.ecart>0?"#6dbf7e":r.ecart<0?"#FF9F0A":"#5A6472"}}>
+                        {r.ecart>0?"+":""}{r.ecart} %
+                      </span>
+                    </div>
+                  ))}
+                </div>;
+              };
+              return <>
+                <div style={{background:"rgba(155,89,247,.07)",border:"1px solid rgba(155,89,247,.25)",borderRadius:8,padding:"10px 12px",marginBottom:14}}>
+                  <div style={{fontSize:12,color:"#8A9BB0"}}>Prix médian toutes essences (€/m³ HT)</div>
+                  <div style={{fontSize:20,fontWeight:700,color:"#9B59F7"}}>{an.globale.med} €</div>
+                  <div style={{fontSize:11,color:"#8A9BB0",marginTop:2}}>
+                    {an.globale.n} ligne{an.globale.n>1?"s":""} chiffrées · de {an.globale.min} à {an.globale.max} € · moyenne {an.globale.moy} €
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:"#5A6472",marginBottom:10,lineHeight:1.6}}>
+                  Écart indiqué par rapport au prix médian global. Seuls les critères avec au moins 2 lignes sont affichés.
+                </div>
+                {bloc("Par essence",an.essence)}
+                {bloc("Par produit (type de débit)",an.produit)}
+                {bloc("Par qualité",an.qualite)}
+                {bloc("Par épaisseur",an.epaisseur," mm")}
+                {bloc("Par section de pièce",an.section)}
+                {bloc("Par longueur",an.longueur)}
+                {bloc("Par volume de la ligne (effet quantité)",an.volume)}
+                <button type="button" onClick={()=>exportPrixCSV(commandes)}
+                  style={{...S.btnBig,marginTop:14,marginBottom:10}}>
+                  ⬇ Télécharger le récapitulatif (Excel)
+                </button>
+                <div style={{fontSize:11,color:"#5A6472",lineHeight:1.6,marginTop:4}}>
+                  Le fichier contient toutes les moyennes par critère et le détail de chaque ligne chiffrée.
+                  Ces moyennes alimentent le « prix conseillé » affiché sur chaque produit.
+                  Un tarif déclaré plus haut reste prioritaire sur la moyenne.
+                </div>
+              </>;
+            })()}
+          </Card>
+
           <Card title="Migration depuis l'ancien Google Sheet">
             <p style={{fontSize:13,color:"#a09080",lineHeight:1.7,marginBottom:14}}>À faire une seule fois : copie toutes les commandes, l'historique et les cubages du Sheet vers Supabase. Relançable sans doublons.</p>
             <Field label="URL de l'ancien Apps Script">
