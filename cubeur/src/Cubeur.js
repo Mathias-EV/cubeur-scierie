@@ -7,7 +7,7 @@ const APPS_SCRIPT_URL_KEY = "cubeur_script_url";
 // ─── DONNÉES ──────────────────────────────────────────────────────────────────
 const PRODUITS = ["Volige","Planche","Liteau","Traverse","Bastaing","Poutre","Poteau","Tasseau","Chevron","Plateau","Lambris","Parquet","Lame de terrasse"];
 const ESSENCES = ["Sapin","Épicéa","Mélèze","Pin","Chêne","Hêtre","Douglas"];
-const QUALITES = ["Choix 1","Choix 2","Choix 3","Menuiserie","Hors cœur","Hors aubier","Rebut","Non trié"];
+const QUALITES = ["Choix 1","Choix 2","Choix 3","Charpente","Menuiserie","Hors cœur","Hors aubier","Rebut","Non trié"];
 const SEP_QUAL = " · ";   // les qualités se cumulent : "Choix 1 · Hors cœur"
 const UNITES   = ["m³","m²","mL"];
 const OPTIONS  = ["Sec","Raboté","Mouluré"];
@@ -1476,19 +1476,19 @@ function SelClientCRM({value,clientId,clients,onPick}){
   return <div ref={boite} style={{display:"flex",flexDirection:"column",gap:6}}>
     {!libreMode&&<>
       <div onClick={()=>{ setOuvert(true); setQ(""); setTimeout(()=>{ const el=boite.current&&boite.current.querySelector("input[data-rech]"); el&&el.focus(); },30); }}
-        style={{...S.select,display:"flex",alignItems:"center",gap:8,cursor:"pointer",
+        style={{...S.select,boxSizing:"border-box",width:"100%",display:"flex",alignItems:"center",gap:8,cursor:"pointer",
           color:value?"#E8ECEF":"#8A9BB0"}}>
         <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
           {value||"— choisir un client —"}
         </span>
         <span style={{fontSize:11,color:"#8A9BB0"}}>🔍</span>
       </div>
-      {ouvert&&<div style={{marginTop:4,
+      {ouvert&&<div style={{marginTop:4,boxSizing:"border-box",width:"100%",
         background:"#272B2F",border:"1px solid rgba(255,255,255,.12)",borderRadius:9,
         boxShadow:"0 12px 32px rgba(0,0,0,.45)",overflow:"hidden"}}>
         <input data-rech autoFocus value={q} onChange={e=>setQ(e.target.value)}
           placeholder="Taper le nom du client ou de l'entreprise…"
-          style={{...S.input,width:"100%",border:"none",borderRadius:0,
+          style={{...S.input,width:"100%",boxSizing:"border-box",border:"none",borderRadius:0,
             borderBottom:"1px solid rgba(255,255,255,.1)",background:"rgba(255,255,255,.03)"}}/>
         <div style={{maxHeight:230,overflowY:"auto"}}>
           <div onClick={()=>{ setLibreMode(true); setOuvert(false); setQ(""); onPick({id:"",nom:"",adresse:""}); }}
@@ -1922,7 +1922,7 @@ function RItem({label,value,big,color}){ return <div><div style={{fontSize:10,co
 
 // Qualités abrégées pour les colonnes étroites des PDF
 function qualiteCourt(q){
-  const abbr={"choix 1":"C1","choix 2":"C2","choix 3":"C3","menuiserie":"Menuis.",
+  const abbr={"choix 1":"C1","choix 2":"C2","choix 3":"C3","menuiserie":"Menuis.","charpente":"Charp.",
               "hors coeur":"H.cœur","hors cœur":"H.cœur","hors aubier":"H.aub",
               "non trie":"N.trié","non trié":"N.trié","rebut":"Rebut"};
   return String(q||"").split(/\s*·\s*|\s*\+\s*/).filter(Boolean)
