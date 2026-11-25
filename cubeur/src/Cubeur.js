@@ -1472,7 +1472,7 @@ function SelClientCRM({value,clientId,clients,onPick}){
   const trouves = rech ? clients.filter(c=>normNom(c.nom).includes(rech)) : clients;
   const choisir=(c)=>{ setLibreMode(false); setOuvert(false); setQ(""); onPick(c); };
 
-  return <div ref={boite} style={{position:"relative",display:"flex",flexDirection:"column",gap:6}}>
+  return <div ref={boite} style={{display:"flex",flexDirection:"column",gap:6}}>
     {!libreMode&&<>
       <div onClick={()=>{ setOuvert(true); setQ(""); setTimeout(()=>{ const el=boite.current&&boite.current.querySelector("input[data-rech]"); el&&el.focus(); },30); }}
         style={{...S.select,display:"flex",alignItems:"center",gap:8,cursor:"pointer",
@@ -1482,7 +1482,7 @@ function SelClientCRM({value,clientId,clients,onPick}){
         </span>
         <span style={{fontSize:11,color:"#8A9BB0"}}>🔍</span>
       </div>
-      {ouvert&&<div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:40,marginTop:4,
+      {ouvert&&<div style={{marginTop:4,
         background:"#272B2F",border:"1px solid rgba(255,255,255,.12)",borderRadius:9,
         boxShadow:"0 12px 32px rgba(0,0,0,.45)",overflow:"hidden"}}>
         <input data-rech autoFocus value={q} onChange={e=>setQ(e.target.value)}
@@ -2457,20 +2457,18 @@ export default function App(){
             </div>
           }
           <Card title="Informations commande">
-            <Row2 style={{marginBottom:12}}>
-              <Field label="Client *">
+            <Field label="Client *" style={{marginBottom:12}}>
                 <SelClientCRM value={form.client} clientId={form.clientId||""} clients={crmClients}
                   onPick={c=>setForm(p=>({...p,client:c.nom,clientId:c.id,
                     adresseClient:c.adresse||"",      // vidé si le nouveau client n'en a pas
                     // téléphone principal si le CRM en a un, sinon celui du 1er interlocuteur
                     telClient:c.tel||((c.contacts&&c.contacts[0]&&c.contacts[0].tel)||""),
                     interlocuteur:(!c.tel&&c.contacts&&c.contacts[0])?(c.contacts[0].nom||""):""}))}/>
-                {crmErr&&<div style={{fontSize:10,color:"#FF9F0A",marginTop:4}}>Liste CRM indisponible — saisie libre possible</div>}
-              </Field>
-              <Field label="Chantier / Référence">
-                <Inp value={form.chantier||""} onChange={sf("chantier")} ph="Ex: Chalet Megève"/>
-              </Field>
-            </Row2>
+              {crmErr&&<div style={{fontSize:10,color:"#FF9F0A",marginTop:4}}>Liste CRM indisponible — saisie libre possible</div>}
+            </Field>
+            <Field label="Chantier / Référence" style={{marginBottom:12}}>
+              <Inp value={form.chantier||""} onChange={sf("chantier")} ph="Ex: Chalet Megève"/>
+            </Field>
             {(()=>{
               const cl=crmClients.find(x=>x.id===form.clientId);
               const cts=(cl&&cl.contacts)||[];
