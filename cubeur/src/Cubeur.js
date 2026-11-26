@@ -1544,6 +1544,8 @@ async function callScript(_url, body){
     res=await sb.from("commandes").delete().eq("id",String(body.id));
   } else if(body.type==="cubageProduit"){
     res=await sb.from("scieur").upsert(scieurRow(body.row,body.id),{onConflict:"cle",ignoreDuplicates:true});
+  } else if(body.type==="deleteHistorique"){
+    res=await sb.from("historique").delete().eq("id",String(body.id));
   } else if(body.type==="saveHistorique"){
     res=await sb.from("historique").upsert({id:String(body.entry.id),data:body.entry},{onConflict:"id",ignoreDuplicates:true});
   }
@@ -1797,6 +1799,14 @@ function exportPrixCSV(commandes){
   a.href=url; a.download="Prix_pratiques_Verdon_"+new Date().toISOString().slice(0,10)+".csv";
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+// Volume scié d'une entrée d'historique : volume réel si connu, sinon volume chargé
+function volHistorique(h){
+  return round((h&&h.lignes||[]).reduce((t,l)=>{
+    const v = (l.volReel!=null && l.volReel!=="") ? pf(l.volReel) : pf(l.volCharge);
+    return t + (isNaN(v)?0:v);
+  },0),3);
 }
 
 // Volume total d'une commande, en m³
@@ -2073,6 +2083,18 @@ export default function App(){
       .some(v=>String(v||"").toLowerCase().includes(q)));
   };
   const [histLimit,setHistLimit]=useState(20);
+  const [confirmHist,setConfirmHist]=useState(null);   // id de l'entrée d'historique à confirmer
+  const [histDel,setHistDel]=useState(false);
+  const supprimerHistorique=async(id)=>{
+    setHistDel(true);
+    try{
+      await callScript(scriptUrl,{type:"deleteHistorique",id});
+      setHistCmds(h=>h.filter(x=>x.id!==id));
+      setHistDetail(d=>(d&&d.id===id)?null:d);
+      showToast("Entrée supprimée de l'historique");
+    }catch(e){ showToast("Erreur : "+e.message,"error"); }
+    setHistDel(false); setConfirmHist(null);
+  };
   const [showRefus,setShowRefus]=useState(false);
 
   // ── Cubage libre ──
@@ -3550,10 +3572,25 @@ export default function App(){
             </div>
           )}
 
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <div style={{color:"#8A9BB0",fontSize:12}}>{histCmds.length} commande{histCmds.length>1?"s":""} réalisée{histCmds.length>1?"s":""}</div>
             <button style={S.btnRefresh} onClick={loadHist}>{histLoading?"⏳":"↻ Actualiser"}</button>
           </div>
+          {histCmds.length>0&&(()=>{
+            const totalTout=round(histCmds.reduce((t,h)=>t+volHistorique(h),0),2);
+            const totalVu  =round(histFiltre.reduce((t,h)=>t+volHistorique(h),0),2);
+            const filtre   =histQ&&histFiltre.length!==histCmds.length;
+            return <div style={{background:"rgba(52,199,89,.07)",border:"1px solid rgba(52,199,89,.25)",
+              borderRadius:9,padding:"11px 13px",marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,color:"#8A9BB0",textTransform:"uppercase",letterSpacing:.3}}>
+                  {filtre?"Total scié (résultats affichés)":"Total scié depuis le début"}
+                </span>
+                <span style={{fontSize:20,fontWeight:700,color:"#34C759"}}>{filtre?totalVu:totalTout} m³</span>
+              </div>
+              {filtre&&<div style={{fontSize:11,color:"#8A9BB0",marginTop:3}}>sur {totalTout} m³ au total</div>}
+            </div>;
+          })()}
           {!scriptUrl&&<div style={{textAlign:"center",padding:16,color:"#34C759",fontSize:13}}>⚠ Non connecté à la base de données</div>}
           {histCmds.length===0&&!histLoading&&scriptUrl&&<Empty icon="📚" text="Aucune commande validée — appuie sur ↻ pour charger"/>}
           {histLoading&&<Empty icon="⏳" text="Chargement..."/>}
@@ -3578,8 +3615,24 @@ export default function App(){
                     {isLibre?"📐 Libre":"✓ Réalisée"}
                   </span>
                   <span style={{fontSize:10,color:"#8A9BB0"}}>{h.dateValidation}</span>
+                  {confirmHist!==h.id&&<button
+                    onClick={(ev)=>{ ev.stopPropagation(); setConfirmHist(h.id); }}
+                    title="Supprimer de l'historique"
+                    style={{background:"transparent",border:"none",color:"#8A9BB0",cursor:"pointer",fontSize:13,padding:2}}>🗑</button>}
                 </div>
               </div>
+              {confirmHist===h.id&&<div onClick={ev=>ev.stopPropagation()}
+                style={{background:"rgba(255,69,58,.08)",border:"1px solid rgba(255,69,58,.3)",borderRadius:8,padding:"10px 12px",marginBottom:8}}>
+                <div style={{fontSize:12.5,color:"#e07a5f",marginBottom:8,lineHeight:1.5}}>
+                  Supprimer <strong>{h.id}</strong> de l'historique ?<br/>
+                  <span style={{fontSize:11,color:"#8A9BB0"}}>Les cubages déjà enregistrés et la commande d'origine ne sont pas touchés.</span>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button style={{...S.btnSmall,flex:1,color:"#e07a5f",borderColor:"rgba(224,122,95,.4)"}}
+                    disabled={histDel} onClick={()=>supprimerHistorique(h.id)}>{histDel?"…":"Confirmer"}</button>
+                  <button style={{...S.btnSmall,flex:1}} onClick={()=>setConfirmHist(null)}>Annuler</button>
+                </div>
+              </div>}
               <div style={{fontSize:12,color:"#8A9BB0",marginBottom:6}}>📅 <strong style={{color:"#c4b09a"}}>{isLibre?h.dateValidation:h.dateLivraison}</strong></div>
               {/* Résumé compact */}
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:6}}>
@@ -3594,7 +3647,10 @@ export default function App(){
                 {(h.lignes||[]).some(l=>l.unite==="m²")&&<span> · <strong style={{color:"#5bb8d4"}}>{m3f((h.lignes||[]).filter(l=>l.unite==="m²").reduce((s,l)=>s+(l.volCharge||0),0),"m²")}</strong></span>}
                 {(h.lignes||[]).some(l=>l.unite==="mL")&&<span> · <strong style={{color:"#9A7A54"}}>{m3f((h.lignes||[]).filter(l=>l.unite==="mL").reduce((s,l)=>s+(l.volCharge||0),0),"mL")}</strong></span>}
               </div>
-              <div style={{fontSize:10,color:"#0A84FF",marginTop:6,textAlign:"right"}}>Appuyer pour voir le détail →</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,gap:8}}>
+                <span style={{fontSize:11,color:"#34C759",fontWeight:700}}>Scié : {volHistorique(h)} m³</span>
+                <span style={{fontSize:10,color:"#0A84FF"}}>Appuyer pour voir le détail →</span>
+              </div>
             </div>
             );
           })}
