@@ -1801,6 +1801,795 @@ function exportPrixCSV(commandes){
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// RÉCAPITULATIF EXCEL DE PILOTAGE
+// Écrit un vrai fichier .xlsx (plusieurs feuilles, mise en forme, barres de
+// données, formules) sans aucune bibliothèque : archive zip « stored » + OOXML.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Mini-archive zip sans compression ──
+const CRC_TBL=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC_TBL[(c^b[i])&0xFF]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zipStored(fichiers){
+  const enc=new TextEncoder();
+  const items=fichiers.map(f=>({nom:enc.encode(f.nom),data:typeof f.data==="string"?enc.encode(f.data):f.data}));
+  let taille=22;
+  items.forEach(it=>{ taille+=30+it.nom.length+it.data.length+46+it.nom.length; });
+  const buf=new Uint8Array(taille), dv=new DataView(buf.buffer);
+  let off=0; const cd=[];
+  items.forEach(it=>{
+    const crc=crc32(it.data), debut=off;
+    dv.setUint32(off,0x04034b50,true); off+=4;
+    dv.setUint16(off,20,true); off+=2;
+    dv.setUint16(off,0x0800,true); off+=2;      // noms de fichiers en UTF-8
+    dv.setUint16(off,0,true); off+=2;           // méthode 0 : stocké
+    dv.setUint16(off,0,true); off+=2;
+    dv.setUint16(off,0x5821,true); off+=2;      // date fixe (1er janv. 2024)
+    dv.setUint32(off,crc,true); off+=4;
+    dv.setUint32(off,it.data.length,true); off+=4;
+    dv.setUint32(off,it.data.length,true); off+=4;
+    dv.setUint16(off,it.nom.length,true); off+=2;
+    dv.setUint16(off,0,true); off+=2;
+    buf.set(it.nom,off); off+=it.nom.length;
+    buf.set(it.data,off); off+=it.data.length;
+    cd.push({nom:it.nom,crc,len:it.data.length,debut});
+  });
+  const debutCD=off;
+  cd.forEach(e=>{
+    dv.setUint32(off,0x02014b50,true); off+=4;
+    dv.setUint16(off,20,true); off+=2;
+    dv.setUint16(off,20,true); off+=2;
+    dv.setUint16(off,0x0800,true); off+=2;
+    dv.setUint16(off,0,true); off+=2;
+    dv.setUint16(off,0,true); off+=2;
+    dv.setUint16(off,0x5821,true); off+=2;
+    dv.setUint32(off,e.crc,true); off+=4;
+    dv.setUint32(off,e.len,true); off+=4;
+    dv.setUint32(off,e.len,true); off+=4;
+    dv.setUint16(off,e.nom.length,true); off+=2;
+    dv.setUint16(off,0,true); off+=2;           // extra
+    dv.setUint16(off,0,true); off+=2;           // commentaire
+    dv.setUint16(off,0,true); off+=2;           // disque
+    dv.setUint16(off,0,true); off+=2;           // attributs internes
+    dv.setUint32(off,0,true); off+=4;           // attributs externes
+    dv.setUint32(off,e.debut,true); off+=4;
+    buf.set(e.nom,off); off+=e.nom.length;
+  });
+  const finCD=off;
+  dv.setUint32(off,0x06054b50,true); off+=4;
+  dv.setUint16(off,0,true); off+=2;
+  dv.setUint16(off,0,true); off+=2;
+  dv.setUint16(off,cd.length,true); off+=2;
+  dv.setUint16(off,cd.length,true); off+=2;
+  dv.setUint32(off,finCD-debutCD,true); off+=4;
+  dv.setUint32(off,debutCD,true); off+=4;
+  dv.setUint16(off,0,true); off+=2;
+  return buf;
+}
+
+// ── Outils XML ──
+const xmlEsc=(s)=>String(s==null?"":s)
+  .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"")
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const colLettre=(i)=>{ let s="",n=i+1; while(n>0){ const r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26); } return s; };
+
+// Index des styles du classeur (voir STYLES_XML)
+const ST={ base:0, titre:1, sous:2, bande:3, entete:4, gras:5, txt:6, ent:7, dec:8,
+           eur:9, eur2:10, pct:11, m3:12, kpiVal:13, note:14, totTxt:15, totEnt:16,
+           totEur:17, totM3:18, totPct:19, noteLong:20, centre:21, kpiBoite:22,
+           kpiLbl:23, jours:24, totDec:25, totEur2:26 };
+
+const STYLES_XML='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+'<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+'<numFmts count="6">'+
+'<numFmt numFmtId="164" formatCode="#,##0"/>'+
+'<numFmt numFmtId="165" formatCode="#,##0.00"/>'+
+'<numFmt numFmtId="166" formatCode="#,##0&quot; €&quot;"/>'+
+'<numFmt numFmtId="167" formatCode="0.0%"/>'+
+'<numFmt numFmtId="168" formatCode="#,##0.000&quot; m³&quot;"/>'+
+'<numFmt numFmtId="169" formatCode="#,##0.00&quot; €&quot;"/>'+
+'</numFmts>'+
+'<fonts count="10">'+
+'<font><sz val="10"/><name val="Arial"/><color rgb="FF1F1A14"/></font>'+
+'<font><sz val="18"/><b/><name val="Arial"/><color rgb="FF3E2F23"/></font>'+
+'<font><sz val="10"/><i/><name val="Arial"/><color rgb="FF6B6257"/></font>'+
+'<font><sz val="11"/><b/><name val="Arial"/><color rgb="FFFFFFFF"/></font>'+
+'<font><sz val="10"/><b/><name val="Arial"/><color rgb="FF3E2F23"/></font>'+
+'<font><sz val="16"/><b/><name val="Arial"/><color rgb="FF3E2F23"/></font>'+
+'<font><sz val="9"/><name val="Arial"/><color rgb="FF8A7B68"/></font>'+
+'<font><sz val="10"/><b/><name val="Arial"/><color rgb="FF2E7D32"/></font>'+
+'<font><sz val="10"/><b/><name val="Arial"/><color rgb="FFB3261E"/></font>'+
+'<font><sz val="13"/><b/><name val="Arial"/><color rgb="FF3E2F23"/></font>'+
+'</fonts>'+
+'<fills count="6">'+
+'<fill><patternFill patternType="none"/></fill>'+
+'<fill><patternFill patternType="gray125"/></fill>'+
+'<fill><patternFill patternType="solid"><fgColor rgb="FF3E2F23"/><bgColor indexed="64"/></patternFill></fill>'+
+'<fill><patternFill patternType="solid"><fgColor rgb="FFF7F2E9"/><bgColor indexed="64"/></patternFill></fill>'+
+'<fill><patternFill patternType="solid"><fgColor rgb="FFEDE0CC"/><bgColor indexed="64"/></patternFill></fill>'+
+'<fill><patternFill patternType="solid"><fgColor rgb="FF8A6E52"/><bgColor indexed="64"/></patternFill></fill>'+
+'</fills>'+
+'<borders count="4">'+
+'<border><left/><right/><top/><bottom/><diagonal/></border>'+
+'<border><left style="thin"><color rgb="FFD9CEBB"/></left><right style="thin"><color rgb="FFD9CEBB"/></right><top style="thin"><color rgb="FFD9CEBB"/></top><bottom style="thin"><color rgb="FFD9CEBB"/></bottom><diagonal/></border>'+
+'<border><left style="thin"><color rgb="FFD9CEBB"/></left><right style="thin"><color rgb="FFD9CEBB"/></right><top style="thin"><color rgb="FFD9CEBB"/></top><bottom style="medium"><color rgb="FF8A6E52"/></bottom><diagonal/></border>'+
+'<border><left style="thin"><color rgb="FFD9CEBB"/></left><right style="thin"><color rgb="FFD9CEBB"/></right><top style="medium"><color rgb="FF8A6E52"/></top><bottom style="thin"><color rgb="FFD9CEBB"/></bottom><diagonal/></border>'+
+'</borders>'+
+'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'+
+'<cellXfs count="27">'+
+'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'+                                                                                   /* 0  base */
+'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+                                                                     /* 1  titre */
+'<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+                                                                     /* 2  sous-titre */
+'<xf numFmtId="0" fontId="3" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>'+ /* 3  bande */
+'<xf numFmtId="0" fontId="4" fillId="4" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>'+ /* 4  en-tête */
+'<xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+                                                                     /* 5  gras */
+'<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>'+                                                                   /* 6  texte */
+'<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 7  entier */
+'<xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 8  décimal */
+'<xf numFmtId="166" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 9  euros */
+'<xf numFmtId="169" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 10 euros 2 déc */
+'<xf numFmtId="167" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 11 pourcentage */
+'<xf numFmtId="168" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 12 m³ */
+'<xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+                                                                     /* 13 valeur KPI */
+'<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/>'+                                                                     /* 14 note */
+'<xf numFmtId="0" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'+                                       /* 15 total texte */
+'<xf numFmtId="164" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"/>'+               /* 16 total entier */
+'<xf numFmtId="166" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"/>'+               /* 17 total euros */
+'<xf numFmtId="168" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"/>'+               /* 18 total m³ */
+'<xf numFmtId="167" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"/>'+               /* 19 total % */
+'<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>'+      /* 20 note longue */
+'<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>'+            /* 21 centré */
+'<xf numFmtId="0" fontId="9" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1"/></xf>'+ /* 22 valeur KPI encadrée */
+'<xf numFmtId="0" fontId="4" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" indent="1" wrapText="1"/></xf>'+      /* 23 libellé KPI */
+'<xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyNumberFormat="1"/>'+                                           /* 24 jours */
+'<xf numFmtId="165" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"/>'+               /* 25 total décimal */
+'<xf numFmtId="169" fontId="4" fillId="4" borderId="3" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyNumberFormat="1"/>'+ /* 26 total € 2 déc. */
+'</cellXfs>'+
+'<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'+
+'</styleSheet>';
+
+// ── Construction d'une feuille ──
+function nouvFeuille(nom){ return {nom,cols:[],lignes:[],merges:[],bars:[],filtre:null,freeze:0}; }
+const TX=(v,s)=>({v:v,t:"s",s:s||0});
+const NB=(v,s)=>({v:(v==null||v===""||isNaN(v))?"":+v,t:"n",s:s||0});
+const FM=(f,s)=>({f:f,s:s||0});
+function ajLigne(f,cells,ht){ f.lignes.push({c:cells||[],ht:ht||0}); return f.lignes.length; }
+function ajVide(f,n){ for(let i=0;i<(n||1);i++) ajLigne(f,[]); }
+function ajBande(f,titre,nbCol){
+  const n=ajLigne(f,[TX(titre,ST.bande)].concat(Array.from({length:Math.max(0,(nbCol||1)-1)},()=>TX("",ST.bande))),20);
+  f.merges.push("A"+n+":"+colLettre((nbCol||1)-1)+n);
+  return n;
+}
+function celluleXml(ref,c){
+  if(c==null) return "";
+  const s=c.s?' s="'+c.s+'"':"";
+  if(c.f!=null) return '<c r="'+ref+'"'+s+'><f>'+xmlEsc(c.f)+'</f></c>';
+  if(c.t==="n"){
+    if(c.v===""||c.v==null||isNaN(c.v)) return '<c r="'+ref+'"'+s+'/>';
+    return '<c r="'+ref+'"'+s+'><v>'+c.v+'</v></c>';
+  }
+  const v=String(c.v==null?"":c.v);
+  if(v==="") return '<c r="'+ref+'"'+s+'/>';
+  return '<c r="'+ref+'"'+s+' t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(v)+'</t></is></c>';
+}
+function feuilleXml(f,premiere){
+  let maxC=1;
+  f.lignes.forEach(r=>{ if(r.c.length>maxC) maxC=r.c.length; });
+  const dim="A1:"+colLettre(maxC-1)+Math.max(1,f.lignes.length);
+  let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
+    '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'+
+    '<dimension ref="'+dim+'"/>'+
+    '<sheetViews><sheetView showGridLines="0"'+(premiere?' tabSelected="1"':'')+' workbookViewId="0">'+
+    (f.freeze?'<pane ySplit="'+f.freeze+'" topLeftCell="A'+(f.freeze+1)+'" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A'+(f.freeze+1)+'" sqref="A'+(f.freeze+1)+'"/>':'')+
+    '</sheetView></sheetViews>'+
+    '<sheetFormatPr defaultRowHeight="14.5"/>';
+  if(f.cols.length){
+    x+='<cols>'+f.cols.map((w,i)=>'<col min="'+(i+1)+'" max="'+(i+1)+'" width="'+w+'" customWidth="1"/>').join("")+'</cols>';
+  }
+  x+='<sheetData>';
+  f.lignes.forEach((r,i)=>{
+    const n=i+1;
+    const cells=r.c.map((c,j)=>celluleXml(colLettre(j)+n,c)).join("");
+    x+='<row r="'+n+'"'+(r.ht?' ht="'+r.ht+'" customHeight="1"':'')+'>'+cells+'</row>';
+  });
+  x+='</sheetData>';
+  if(f.filtre) x+='<autoFilter ref="'+f.filtre+'"/>';
+  if(f.merges.length) x+='<mergeCells count="'+f.merges.length+'">'+f.merges.map(m=>'<mergeCell ref="'+m+'"/>').join("")+'</mergeCells>';
+  f.bars.forEach((b,i)=>{
+    x+='<conditionalFormatting sqref="'+b.ref+'"><cfRule type="dataBar" priority="'+(i+1)+'"><dataBar showValue="1">'+
+       '<cfvo type="num" val="0"/><cfvo type="'+(b.max!=null?'num':'max')+'"'+(b.max!=null?' val="'+b.max+'"':'')+'/>'+
+       '<color rgb="FF'+(b.couleur||"A8C3A0")+'"/></dataBar></cfRule></conditionalFormatting>';
+  });
+  x+='<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/>'+
+     '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>';
+  x+='</worksheet>';
+  return x;
+}
+function classeurXlsx(feuilles){
+  const ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+    '<Default Extension="xml" ContentType="application/xml"/>'+
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+    feuilles.map((f,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("")+
+    '</Types>';
+  const rels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'+
+    '</Relationships>';
+  const wb='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets>'+feuilles.map((f,i)=>'<sheet name="'+xmlEsc(f.nom)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join("")+'</sheets>'+
+    '<calcPr calcId="124519" fullCalcOnLoad="1"/></workbook>';
+  const wbRels='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    feuilles.map((f,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join("")+
+    '<Relationship Id="rId'+(feuilles.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'+
+    '</Relationships>';
+  const parts=[
+    {nom:"[Content_Types].xml",data:ct},
+    {nom:"_rels/.rels",data:rels},
+    {nom:"xl/workbook.xml",data:wb},
+    {nom:"xl/_rels/workbook.xml.rels",data:wbRels},
+    {nom:"xl/styles.xml",data:STYLES_XML}
+  ];
+  feuilles.forEach((f,i)=>parts.push({nom:"xl/worksheets/sheet"+(i+1)+".xml",data:feuilleXml(f,i===0)}));
+  return zipStored(parts);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CALCUL DES INDICATEURS
+// ═══════════════════════════════════════════════════════════════════════════════
+const MOIS_FR=["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
+// Les dates de l'application sont au format jj/mm/aa hh:mm, ou aaaa-mm-jj pour les dates saisies
+function dateDe(s){
+  if(!s) return null;
+  const v=String(s).trim();
+  let m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if(m){ let a=+m[3]; if(a<100) a+=2000; const d=new Date(a,+m[2]-1,+m[1]); return isNaN(d)?null:d; }
+  m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m){ const d=new Date(+m[1],+m[2]-1,+m[3]); return isNaN(d)?null:d; }
+  return null;
+}
+const cleMois=(d)=>d?d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"):"";
+const libMois=(c)=>{ const p=String(c).split("-"); return MOIS_FR[+p[1]-1]+" "+p[0]; };
+const jjmmaa=(d)=>d?String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear():"";
+
+// Statut commercial d'une commande
+const estBrouillon=(c)=>c.statut==="brouillon";
+const estSciee=(c)=>["valide","Validée"].includes(c.statut);
+const estRefuse=(c)=>c.devisStatut==="refuse";
+const estAccepte=(c)=>!estRefuse(c)&&(c.devisStatut==="accepte"||estSciee(c)||["production","En production"].includes(c.statut));
+const estAttente=(c)=>!estRefuse(c)&&!estAccepte(c);
+
+// Montant HT d'une commande : recalculé, avec repli sur la valeur enregistrée
+function caCmd(c){
+  let v=0;
+  try{ v=totalCommandeHT(c)||0; }catch(e){ v=0; }
+  if(!v){ const s=pf(c.totalHT); if(!isNaN(s)) v=s; }
+  return round(v||0,2);
+}
+// Chiffre d'affaires HT d'une seule ligne de devis
+function caLigne(l){
+  const h=ligneHT(l);
+  if(h==null) return 0;
+  return round((l.typeTaxe||"HT")==="TTC"?h/1.2:h,2);
+}
+const partage=(a,b)=>(b?round(a/b,6):null);
+
+function calculKPI(commandes,histCmds){
+  const cmds=(commandes||[]).filter(c=>c&&!estBrouillon(c));
+  const hist=(histCmds||[]).filter(h=>h&&h.id);
+  const acc=cmds.filter(estAccepte), ref=cmds.filter(estRefuse), att=cmds.filter(estAttente);
+  const sciees=cmds.filter(estSciee);
+
+  const caAcc=round(acc.reduce((t,c)=>t+caCmd(c),0),2);
+  const caRef=round(ref.reduce((t,c)=>t+caCmd(c),0),2);
+  const caAtt=round(att.reduce((t,c)=>t+caCmd(c),0),2);
+  const caSciees=round(sciees.reduce((t,c)=>t+caCmd(c),0),2);
+  const caEnCours=round(caAcc-caSciees,2);
+
+  const m3Commande=round(acc.reduce((t,c)=>t+(volCommande(c)||0),0),3);
+  const m3Scie=round(hist.reduce((t,h)=>t+(volHistorique(h)||0),0),3);
+  const m3Attente=round(acc.filter(c=>!estSciee(c)).reduce((t,c)=>t+(volCommande(c)||0),0),3);
+
+  // Rendement et perte moyens sur les lignes de sciage renseignées
+  const rends=[],pertes=[];
+  hist.forEach(h=>(h.lignes||[]).forEach(l=>{
+    const r=pf(l.rend), p=pf(l.perte);
+    if(!isNaN(r)&&r>0&&r<=100) rends.push(r);
+    if(!isNaN(p)&&p>=0&&p<=100) pertes.push(p);
+  }));
+
+  // Délai entre la création du devis et la validation du sciage
+  const parId={}; cmds.forEach(c=>{ parId[String(c.id)]=c; });
+  const delais=[];
+  hist.forEach(h=>{
+    const c=parId[String(h.id)]; if(!c) return;
+    const d1=dateDe(c.dateCreation), d2=dateDe(h.dateValidation);
+    if(d1&&d2){ const j=(d2-d1)/86400000; if(j>=0&&j<400) delais.push(round(j,1)); }
+  });
+
+  // Dates extrêmes pour afficher la période couverte
+  const toutesDates=[];
+  cmds.forEach(c=>{ const d=dateDe(c.dateCreation); if(d) toutesDates.push(d); });
+  hist.forEach(h=>{ const d=dateDe(h.dateValidation); if(d) toutesDates.push(d); });
+  toutesDates.sort((a,b)=>a-b);
+
+  // ── Par mois ──
+  const mois={};
+  const mo=(k)=>(mois[k]=mois[k]||{cle:k,emis:0,acc:0,ref:0,att:0,caAcc:0,caRef:0,caEmis:0,sciees:0,m3:0});
+  cmds.forEach(c=>{ const k=cleMois(dateDe(c.dateCreation)); if(!k) return; const m=mo(k);
+    m.emis++; m.caEmis+=caCmd(c);
+    if(estAccepte(c)){ m.acc++; m.caAcc+=caCmd(c); }
+    else if(estRefuse(c)){ m.ref++; m.caRef+=caCmd(c); }
+    else m.att++;
+  });
+  hist.forEach(h=>{ const k=cleMois(dateDe(h.dateValidation)); if(!k) return; const m=mo(k);
+    m.sciees++; m.m3+=(volHistorique(h)||0);
+  });
+  const parMois=Object.keys(mois).sort().map(k=>{ const m=mois[k];
+    return {...m,caAcc:round(m.caAcc,2),caRef:round(m.caRef,2),caEmis:round(m.caEmis,2),m3:round(m.m3,3)}; });
+
+  // ── Par client ──
+  const cl={};
+  const cle=(nom)=>normNom(nom)||"(sans nom)";
+  cmds.forEach(c=>{
+    const k=cle(c.client); const o=cl[k]=cl[k]||{nom:c.client||"(sans nom)",emis:0,acc:0,ref:0,att:0,ca:0,caRef:0,m3:0,sciees:0,m3Scie:0,prem:null,dern:null};
+    if(!o.nom||o.nom==="(sans nom)") o.nom=c.client||o.nom;
+    o.emis++;
+    if(estAccepte(c)){ o.acc++; o.ca+=caCmd(c); o.m3+=(volCommande(c)||0); }
+    else if(estRefuse(c)){ o.ref++; o.caRef+=caCmd(c); }
+    else o.att++;
+    const d=dateDe(c.dateCreation);
+    if(d){ if(!o.prem||d<o.prem) o.prem=d; if(!o.dern||d>o.dern) o.dern=d; }
+  });
+  hist.forEach(h=>{
+    if(!h.client||normNom(h.client)==="cubage libre") return;
+    const k=cle(h.client); const o=cl[k]=cl[k]||{nom:h.client,emis:0,acc:0,ref:0,att:0,ca:0,caRef:0,m3:0,sciees:0,m3Scie:0,prem:null,dern:null};
+    o.sciees++; o.m3Scie+=(volHistorique(h)||0);
+  });
+  const parClient=Object.keys(cl).map(k=>{ const o=cl[k];
+    return {...o,ca:round(o.ca,2),caRef:round(o.caRef,2),m3:round(o.m3,3),m3Scie:round(o.m3Scie,3)}; })
+    .sort((a,b)=>b.ca-a.ca||b.emis-a.emis);
+
+  // ── Par produit / essence / qualité, sur les devis acceptés ──
+  const regroupe=(champ)=>{
+    const g={};
+    acc.forEach(c=>(c.lignes||[]).forEach(l=>{
+      const brut=String(l[champ]||"").trim(); if(!brut) return;
+      const k=normNom(brut);
+      const o=g[k]=g[k]||{nom:brut,lignes:0,m3:0,ca:0,prix:[]};
+      o.lignes++; o.m3+=(volLigneM3(l)||0); o.ca+=caLigne(l);
+      const p=prixBaseHT(l); if(p!=null&&baseTarif(l)==="m³") o.prix.push(p);
+    }));
+    return Object.keys(g).map(k=>{ const o=g[k];
+      return {nom:o.nom,lignes:o.lignes,m3:round(o.m3,3),ca:round(o.ca,2),
+              med:mediane(o.prix),moy:moyenne(o.prix),n:o.prix.length}; })
+      .sort((a,b)=>b.ca-a.ca);
+  };
+
+  // Les prix pratiqués reprennent toutes les commandes, brouillons compris :
+  // c'est exactement la base du « prix conseillé » affiché dans l'application
+  const ech=echantillons(commandes||[]).filter(x=>x.base==="m³");
+  const stPrix=ech.length?statsLot(ech):null;
+
+  return {
+    nbDevis:cmds.length, nbAcc:acc.length, nbRef:ref.length, nbAtt:att.length, nbSciees:sciees.length,
+    caAcc, caRef, caAtt, caSciees, caEnCours,
+    tauxRepondus:partage(acc.length,acc.length+ref.length),
+    tauxBrut:partage(acc.length,cmds.length),
+    tauxCA:partage(caAcc,caAcc+caRef),
+    panier:acc.length?round(caAcc/acc.length,2):null,
+    devisMoyen:cmds.length?round(cmds.reduce((t,c)=>t+caCmd(c),0)/cmds.length,2):null,
+    plusGros:cmds.reduce((m,c)=>Math.max(m,caCmd(c)),0),
+    m3Commande, m3Scie, m3Attente,
+    m3MoyenCmd:sciees.length?round(m3Scie/Math.max(1,hist.length),3):null,
+    rendMoyen:rends.length?moyenne(rends):null, perteMoyen:pertes.length?moyenne(pertes):null,
+    nbLignesSciage:hist.reduce((t,h)=>t+((h.lignes||[]).length),0),
+    delaiMoyen:delais.length?moyenne(delais):null, delaiMax:delais.length?Math.max(...delais):null,
+    nbClients:parClient.length,
+    nbClientsActifs:parClient.filter(c=>c.acc>0).length,
+    caParClient:parClient.filter(c=>c.acc>0).length?round(caAcc/parClient.filter(c=>c.acc>0).length,2):null,
+    top3:round(parClient.slice(0,3).reduce((t,c)=>t+c.ca,0),2),
+    prixMed:stPrix?stPrix.med:null, prixMoy:stPrix?stPrix.moy:null,
+    prixMin:stPrix?stPrix.min:null, prixMax:stPrix?stPrix.max:null, prixN:stPrix?stPrix.n:0,
+    prixRealise:m3Commande?round(caAcc/m3Commande,2):null,
+    parMois, parClient, parProduit:regroupe("produit"), parEssence:regroupe("essence"), parQualite:regroupe("qualite"),
+    toutes:(commandes||[]),
+    debut:toutesDates[0]||null, fin:toutesDates[toutesDates.length-1]||null,
+    cmds, hist, acc
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GÉNÉRATION DU CLASSEUR
+// ═══════════════════════════════════════════════════════════════════════════════
+function exportRecapExcel(commandes,histCmds){
+  const k=calculKPI(commandes,histCmds);
+  const auj=new Date();
+  const periode=k.debut&&k.fin?("du "+jjmmaa(k.debut)+" au "+jjmmaa(k.fin)):"aucune donnée datée";
+  const feuilles=[];
+
+  // ─────────────────────────── 1. SYNTHÈSE ───────────────────────────
+  const s=nouvFeuille("Synthèse");
+  s.cols=[42,20,2,42,20];
+  ajLigne(s,[TX("RÉCAPITULATIF DE PILOTAGE — SCIERIE VERDON",ST.titre)],26);
+  s.merges.push("A1:E1");
+  ajLigne(s,[TX("Export du "+jjmmaa(auj)+" · données "+periode+" · montants en euros hors taxes",ST.sous)]);
+  s.merges.push("A2:E2");
+  ajVide(s);
+
+  // Petites tuiles : libellé / valeur, trois par ligne
+  const tuiles=(titre,liste)=>{
+    ajBande(s,titre,5);
+    for(let i=0;i<liste.length;i+=2){
+      const ligne=[];
+      [0,1].forEach(j=>{
+        const t=liste[i+j];
+        if(!t){ ligne.push(TX("")); ligne.push(TX("")); ligne.push(TX("")); return; }
+        ligne.push(TX(t[0],ST.kpiLbl));
+        ligne.push(TX(t[1]==null?"—":t[1],ST.kpiBoite));
+        if(j===0) ligne.push(TX(""));
+      });
+      ajLigne(s,ligne,21);
+    }
+    ajVide(s);
+  };
+  // Les valeurs sont formatées en texte pour rester lisibles côte à côte
+  const e=(v)=>v==null?"—":new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0}).format(v)+" €";
+  const pc=(v)=>v==null?"—":new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(v*100)+" %";
+  const vol=(v)=>v==null?"—":new Intl.NumberFormat("fr-FR",{maximumFractionDigits:3}).format(v)+" m³";
+  const nb=(v)=>v==null?"—":new Intl.NumberFormat("fr-FR",{maximumFractionDigits:1}).format(v);
+
+  tuiles("ACTIVITÉ COMMERCIALE — DEVIS",[
+    ["Devis émis (hors brouillons)",nb(k.nbDevis)],
+    ["Devis acceptés",nb(k.nbAcc)],
+    ["Devis refusés",nb(k.nbRef)],
+    ["En attente de réponse",nb(k.nbAtt)],
+    ["Taux de transformation (devis répondus)",pc(k.tauxRepondus)],
+    ["Taux de transformation (tous devis émis)",pc(k.tauxBrut)],
+    ["Taux de transformation en valeur (€)",pc(k.tauxCA)],
+    ["Devis moyen émis",e(k.devisMoyen)],
+    ["Plus gros devis",e(k.plusGros||null)]
+  ]);
+  tuiles("CHIFFRE D'AFFAIRES HT",[
+    ["CA signé (devis acceptés)",e(k.caAcc)],
+    ["CA déjà scié",e(k.caSciees)],
+    ["CA accepté restant à scier",e(k.caEnCours)],
+    ["CA en attente de réponse",e(k.caAtt)],
+    ["CA perdu (devis refusés)",e(k.caRef)],
+    ["Panier moyen (par devis accepté)",e(k.panier)]
+  ]);
+  tuiles("PRODUCTION",[
+    ["Commandes sciées",nb(k.nbSciees)],
+    ["Entrées d'historique (sciages)",nb(k.hist.length)],
+    ["m³ sciés depuis le début",vol(k.m3Scie)],
+    ["m³ moyen par sciage",vol(k.m3MoyenCmd)],
+    ["m³ commandés (devis acceptés)",vol(k.m3Commande)],
+    ["m³ restant à scier",vol(k.m3Attente)],
+    ["Rendement moyen constaté",k.rendMoyen==null?"—":nb(k.rendMoyen)+" %"],
+    ["Perte moyenne constatée",k.perteMoyen==null?"—":nb(k.perteMoyen)+" %"],
+    ["Lignes de produits sciées",nb(k.nbLignesSciage)],
+    ["Délai moyen devis → sciage",k.delaiMoyen==null?"—":nb(k.delaiMoyen)+" jours"],
+    ["Délai le plus long",k.delaiMax==null?"—":nb(k.delaiMax)+" jours"]
+  ]);
+  tuiles("CLIENTS",[
+    ["Clients au fichier (devis ou sciage)",nb(k.nbClients)],
+    ["Clients avec au moins un devis signé",nb(k.nbClientsActifs)],
+    ["CA moyen par client actif",e(k.caParClient)],
+    ["Meilleur client",k.parClient[0]?String(k.parClient[0].nom).slice(0,26):"—"],
+    ["CA du meilleur client",k.parClient[0]?e(k.parClient[0].ca):"—"],
+    ["Part du CA des 3 premiers clients",pc(partage(k.top3,k.caAcc))]
+  ]);
+  tuiles("PRIX PRATIQUÉS (€/m³ HT)",[
+    ["Prix médian",k.prixMed==null?"—":nb(k.prixMed)+" €"],
+    ["Prix moyen",k.prixMoy==null?"—":nb(k.prixMoy)+" €"],
+    ["Fourchette constatée",k.prixMin==null?"—":nb(k.prixMin)+" à "+nb(k.prixMax)+" €"],
+    ["Prix moyen réalisé (CA ÷ m³ commandés)",k.prixRealise==null?"—":nb(k.prixRealise)+" €"],
+    ["Lignes chiffrées au m³",nb(k.prixN)],
+    ["Essences différentes vendues",nb(k.parEssence.length)]
+  ]);
+
+  ajBande(s,"RÉPARTITION DES DEVIS",5);
+  const rD=ajLigne(s,[TX("Statut",ST.entete),TX("Nombre",ST.entete),TX(""),TX("Part des devis",ST.entete),TX("Montant HT",ST.entete)],28);
+  const rep=[["Acceptés",k.nbAcc,k.caAcc],["Refusés",k.nbRef,k.caRef],["En attente de réponse",k.nbAtt,k.caAtt]];
+  rep.forEach(r=>{
+    ajLigne(s,[TX(r[0],ST.txt),NB(r[1],ST.ent),TX(""),FM("IFERROR(B"+(s.lignes.length+1)+"/$B$"+(rD+4)+',"")',ST.pct),NB(r[2],ST.eur)]);
+  });
+  ajLigne(s,[TX("Total",ST.totTxt),FM("SUM(B"+(rD+1)+":B"+(rD+3)+")",ST.totEnt),TX("",ST.totTxt),
+                        FM("IFERROR(SUM(D"+(rD+1)+":D"+(rD+3)+"),0)",ST.totPct),
+                        FM("SUM(E"+(rD+1)+":E"+(rD+3)+")",ST.totEur)]);
+  s.bars.push({ref:"D"+(rD+1)+":D"+(rD+3),max:1,couleur:"A8C3A0"});
+  ajVide(s);
+  ajLigne(s,[TX("Comment lire ces chiffres",ST.gras)]);
+  [ "Un devis est « accepté » s'il a été marqué accepté, mis en production ou scié ; « refusé » s'il a été marqué refusé ; sinon il est compté en attente de réponse.",
+    "Le taux de transformation sur devis répondus écarte les devis sans réponse : c'est le taux le plus juste pour juger la conversion. Le taux brut inclut tous les devis émis.",
+    "Les brouillons ne sont jamais comptés. Les montants sont recalculés à partir des lignes (remise et livraison incluses), hors taxes.",
+    "Les m³ sciés viennent de l'historique : volume réel mesuré quand il existe, sinon volume chargé. Les m³ commandés viennent des dimensions des devis acceptés.",
+    "Les feuilles suivantes détaillent chaque indicateur par mois, par client, par produit et par essence, et contiennent le détail ligne à ligne."
+  ].forEach(t=>ajLigne(s,[TX("· "+t,ST.note)]));
+  feuilles.push(s);
+
+  // ─────────────────────────── 2. DEVIS & CONVERSION ───────────────────────────
+  const d=nouvFeuille("Devis & conversion");
+  d.cols=[16,12,12,12,12,14,16,16,16];
+  ajLigne(d,[TX("DEVIS & TAUX DE TRANSFORMATION, MOIS PAR MOIS",ST.titre)],26);
+  d.merges.push("A1:I1");
+  ajLigne(d,[TX("Le taux est calculé sur les devis ayant reçu une réponse (acceptés + refusés).",ST.sous)]);
+  d.merges.push("A2:I2");
+  ajVide(d);
+  const dH=ajLigne(d,[TX("Mois",ST.entete),TX("Devis émis",ST.entete),TX("Acceptés",ST.entete),
+    TX("Refusés",ST.entete),TX("Sans réponse",ST.entete),TX("Taux de transfo.",ST.entete),
+    TX("CA signé HT",ST.entete),TX("CA perdu HT",ST.entete),TX("Panier moyen HT",ST.entete)],30);
+  d.freeze=dH;
+  k.parMois.forEach(m=>{
+    const n=d.lignes.length+1;
+    ajLigne(d,[TX(libMois(m.cle),ST.txt),NB(m.emis,ST.ent),NB(m.acc,ST.ent),NB(m.ref,ST.ent),NB(m.att,ST.ent),
+      FM('IFERROR(C'+n+'/(C'+n+'+D'+n+'),"")',ST.pct),NB(m.caAcc,ST.eur),NB(m.caRef,ST.eur),
+      FM('IFERROR(G'+n+'/C'+n+',"")',ST.eur)]);
+  });
+  if(k.parMois.length){
+    const p=dH+1, q=d.lignes.length;
+    const n=ajLigne(d,[TX("TOTAL",ST.totTxt),FM("SUM(B"+p+":B"+q+")",ST.totEnt),FM("SUM(C"+p+":C"+q+")",ST.totEnt),
+      FM("SUM(D"+p+":D"+q+")",ST.totEnt),FM("SUM(E"+p+":E"+q+")",ST.totEnt),
+      FM('IFERROR(C'+(q+1)+'/(C'+(q+1)+'+D'+(q+1)+'),"")',ST.totPct),
+      FM("SUM(G"+p+":G"+q+")",ST.totEur),FM("SUM(H"+p+":H"+q+")",ST.totEur),
+      FM('IFERROR(G'+(q+1)+'/C'+(q+1)+',"")',ST.totEur)]);
+    d.bars.push({ref:"F"+p+":F"+q,max:1,couleur:"A8C3A0"});
+    d.bars.push({ref:"G"+p+":G"+q,couleur:"C7A87A"});
+  }
+  ajVide(d);
+  ajBande(d,"CONVERSION PAR CLIENT (classement par CA signé)",9);
+  const dC=ajLigne(d,[TX("Client",ST.entete),TX("Devis émis",ST.entete),TX("Acceptés",ST.entete),
+    TX("Refusés",ST.entete),TX("Sans réponse",ST.entete),TX("Taux de transfo.",ST.entete),
+    TX("CA signé HT",ST.entete),TX("CA perdu HT",ST.entete),TX("Panier moyen HT",ST.entete)],30);
+  k.parClient.filter(c=>c.emis>0).forEach(c=>{
+    const n=d.lignes.length+1;
+    ajLigne(d,[TX(c.nom,ST.txt),NB(c.emis,ST.ent),NB(c.acc,ST.ent),NB(c.ref,ST.ent),NB(c.att,ST.ent),
+      FM('IFERROR(C'+n+'/(C'+n+'+D'+n+'),"")',ST.pct),NB(c.ca,ST.eur),NB(c.caRef,ST.eur),
+      FM('IFERROR(G'+n+'/C'+n+',"")',ST.eur)]);
+  });
+  const nbCl=k.parClient.filter(c=>c.emis>0).length;
+  if(nbCl){ d.bars.push({ref:"F"+(dC+1)+":F"+(dC+nbCl),max:1,couleur:"A8C3A0"});
+            d.bars.push({ref:"G"+(dC+1)+":G"+(dC+nbCl),couleur:"C7A87A"}); }
+  feuilles.push(d);
+
+  // ─────────────────────────── 3. PRODUCTION ───────────────────────────
+  const p=nouvFeuille("Production");
+  p.cols=[16,14,14,16,16,16,16];
+  ajLigne(p,[TX("PRODUCTION SCIÉE, MOIS PAR MOIS",ST.titre)],26);
+  p.merges.push("A1:G1");
+  ajLigne(p,[TX("Volume réel mesuré au cubage quand il est renseigné, sinon volume chargé.",ST.sous)]);
+  p.merges.push("A2:G2");
+  ajVide(p);
+  const pH=ajLigne(p,[TX("Mois",ST.entete),TX("Sciages",ST.entete),TX("m³ sciés",ST.entete),
+    TX("m³ moyen par sciage",ST.entete),TX("Devis émis",ST.entete),TX("Devis signés",ST.entete),
+    TX("CA signé HT",ST.entete)],30);
+  p.freeze=pH;
+  k.parMois.forEach(m=>{
+    const n=p.lignes.length+1;
+    ajLigne(p,[TX(libMois(m.cle),ST.txt),NB(m.sciees,ST.ent),NB(m.m3,ST.m3),
+      FM('IFERROR(C'+n+'/B'+n+',"")',ST.m3),NB(m.emis,ST.ent),NB(m.acc,ST.ent),NB(m.caAcc,ST.eur)]);
+  });
+  if(k.parMois.length){
+    const a=pH+1, b=p.lignes.length;
+    const n=ajLigne(p,[TX("TOTAL",ST.totTxt),FM("SUM(B"+a+":B"+b+")",ST.totEnt),FM("SUM(C"+a+":C"+b+")",ST.totM3),
+      FM('IFERROR(C'+(b+1)+'/B'+(b+1)+',"")',ST.totM3),FM("SUM(E"+a+":E"+b+")",ST.totEnt),
+      FM("SUM(F"+a+":F"+b+")",ST.totEnt),FM("SUM(G"+a+":G"+b+")",ST.totEur)]);
+    p.bars.push({ref:"C"+a+":C"+b,couleur:"A8C3A0"});
+    p.bars.push({ref:"G"+a+":G"+b,couleur:"C7A87A"});
+  }
+  ajVide(p);
+  ajBande(p,"VOLUMES SCIÉS PAR CLIENT",7);
+  const pC=ajLigne(p,[TX("Client",ST.entete),TX("Sciages",ST.entete),TX("m³ sciés",ST.entete),
+    TX("m³ commandés",ST.entete),TX("CA signé HT",ST.entete),TX("Prix réalisé €/m³",ST.entete)],30);
+  const clSci=k.parClient.filter(c=>c.m3Scie>0||c.m3>0);
+  clSci.forEach(c=>{
+    const n=p.lignes.length+1;
+    ajLigne(p,[TX(c.nom,ST.txt),NB(c.sciees,ST.ent),NB(c.m3Scie,ST.m3),NB(c.m3,ST.m3),NB(c.ca,ST.eur),
+      FM('IFERROR(E'+n+'/D'+n+',"")',ST.eur2)]);
+  });
+  if(clSci.length) p.bars.push({ref:"C"+(pC+1)+":C"+(pC+clSci.length),couleur:"A8C3A0"});
+  ajLigne(p,[TX("Les cubages libres, enregistrés sans client, ne sont pas repris dans ce tableau mais comptent dans le total scié.",ST.note)]);
+  ajVide(p);
+  ajBande(p,"RENDEMENT",7);
+  ajLigne(p,[TX("Rendement moyen constaté :  "+(k.rendMoyen==null?"—":nb(k.rendMoyen)+" %"),ST.gras)],18);
+  ajLigne(p,[TX("Perte moyenne constatée :  "+(k.perteMoyen==null?"—":nb(k.perteMoyen)+" %"),ST.gras)],18);
+  ajLigne(p,[TX("Délai moyen entre le devis et le sciage :  "+(k.delaiMoyen==null?"—":nb(k.delaiMoyen)+" jours")+(k.delaiMax==null?"":"   (le plus long : "+nb(k.delaiMax)+" jours)"),ST.gras)],18);
+  ajLigne(p,[TX("Calculés uniquement sur les sciages où le volume de grume a été saisi.",ST.note)]);
+  feuilles.push(p);
+
+  // ─────────────────────────── 4. CLIENTS ───────────────────────────
+  const c4=nouvFeuille("Clients");
+  c4.cols=[30,11,11,11,14,16,16,14,14,14,13,13];
+  ajLigne(c4,[TX("FICHE DE SYNTHÈSE PAR CLIENT",ST.titre)],26);
+  c4.merges.push("A1:L1");
+  ajLigne(c4,[TX("Classement par chiffre d'affaires signé. Utilise les flèches de filtre pour trier autrement.",ST.sous)]);
+  c4.merges.push("A2:L2");
+  ajVide(c4);
+  const cH=ajLigne(c4,[TX("Client",ST.entete),TX("Devis émis",ST.entete),TX("Signés",ST.entete),
+    TX("Refusés",ST.entete),TX("Taux de transfo.",ST.entete),TX("CA signé HT",ST.entete),
+    TX("Panier moyen HT",ST.entete),TX("m³ commandés",ST.entete),TX("m³ sciés",ST.entete),
+    TX("Prix réalisé €/m³",ST.entete),TX("Premier devis",ST.entete),TX("Dernier devis",ST.entete)],32);
+  c4.freeze=cH;
+  k.parClient.forEach(c=>{
+    const n=c4.lignes.length+1;
+    ajLigne(c4,[TX(c.nom,ST.txt),NB(c.emis,ST.ent),NB(c.acc,ST.ent),NB(c.ref,ST.ent),
+      FM('IFERROR(C'+n+'/(C'+n+'+D'+n+'),"")',ST.pct),NB(c.ca,ST.eur),
+      FM('IFERROR(F'+n+'/C'+n+',"")',ST.eur),NB(c.m3,ST.m3),NB(c.m3Scie,ST.m3),
+      FM('IFERROR(F'+n+'/H'+n+',"")',ST.eur2),TX(jjmmaa(c.prem),ST.centre),TX(jjmmaa(c.dern),ST.centre)]);
+  });
+  if(k.parClient.length){
+    const a=cH+1, b=c4.lignes.length;
+    ajLigne(c4,[TX("TOTAL",ST.totTxt),FM("SUM(B"+a+":B"+b+")",ST.totEnt),FM("SUM(C"+a+":C"+b+")",ST.totEnt),
+      FM("SUM(D"+a+":D"+b+")",ST.totEnt),FM('IFERROR(C'+(b+1)+'/(C'+(b+1)+'+D'+(b+1)+'),"")',ST.totPct),
+      FM("SUM(F"+a+":F"+b+")",ST.totEur),FM('IFERROR(F'+(b+1)+'/C'+(b+1)+',"")',ST.totEur),
+      FM("SUM(H"+a+":H"+b+")",ST.totM3),FM("SUM(I"+a+":I"+b+")",ST.totM3),
+      FM('IFERROR(F'+(b+1)+'/H'+(b+1)+',"")',ST.totEur2),TX("",ST.totTxt),TX("",ST.totTxt)]);
+    c4.filtre="A"+cH+":L"+b;
+    c4.bars.push({ref:"F"+a+":F"+b,couleur:"C7A87A"});
+    c4.bars.push({ref:"E"+a+":E"+b,max:1,couleur:"A8C3A0"});
+    c4.bars.push({ref:"I"+a+":I"+b,couleur:"9FB8CC"});
+  }
+  feuilles.push(c4);
+
+  // ─────────────────────────── 5. PRODUITS & ESSENCES ───────────────────────────
+  const pr=nouvFeuille("Produits & essences");
+  pr.cols=[26,12,14,16,14,14,14,14];
+  ajLigne(pr,[TX("RÉPARTITION PAR PRODUIT, ESSENCE ET QUALITÉ",ST.titre)],26);
+  pr.merges.push("A1:H1");
+  ajLigne(pr,[TX("Sur les devis acceptés uniquement. Prix médian et moyen calculés sur les lignes tarifées au m³.",ST.sous)]);
+  pr.merges.push("A2:H2");
+  ajVide(pr);
+  const blocTab=(titre,libelle,rows)=>{
+    ajBande(pr,titre,8);
+    const h=ajLigne(pr,[TX(libelle,ST.entete),TX("Lignes",ST.entete),TX("m³ vendus",ST.entete),
+      TX("CA HT",ST.entete),TX("Part du CA",ST.entete),TX("Prix médian €/m³",ST.entete),
+      TX("Prix moyen €/m³",ST.entete),TX("Lignes chiffrées",ST.entete)],30);
+    if(!rows.length){ ajLigne(pr,[TX("Aucune donnée",ST.txt)]); ajVide(pr); return; }
+    const totalCA=round(rows.reduce((t,r)=>t+r.ca,0),2);
+    rows.forEach(r=>{
+      const n=pr.lignes.length+1;
+      ajLigne(pr,[TX(r.nom,ST.txt),NB(r.lignes,ST.ent),NB(r.m3,ST.m3),NB(r.ca,ST.eur),
+        FM('IFERROR(D'+n+'/$D$'+(h+rows.length+1)+',"")',ST.pct),NB(r.med,ST.eur2),NB(r.moy,ST.eur2),NB(r.n,ST.ent)]);
+    });
+    const a=h+1, b=pr.lignes.length;
+    ajLigne(pr,[TX("TOTAL",ST.totTxt),FM("SUM(B"+a+":B"+b+")",ST.totEnt),FM("SUM(C"+a+":C"+b+")",ST.totM3),
+      FM("SUM(D"+a+":D"+b+")",ST.totEur),FM("SUM(E"+a+":E"+b+")",ST.totPct),TX("",ST.totTxt),TX("",ST.totTxt),
+      FM("SUM(H"+a+":H"+b+")",ST.totEnt)]);
+    pr.bars.push({ref:"D"+a+":D"+b,couleur:"C7A87A"});
+    pr.bars.push({ref:"C"+a+":C"+b,couleur:"A8C3A0"});
+    ajVide(pr);
+  };
+  blocTab("PAR PRODUIT (TYPE DE DÉBIT)","Produit",k.parProduit);
+  blocTab("PAR ESSENCE","Essence",k.parEssence);
+  blocTab("PAR QUALITÉ","Qualité",k.parQualite);
+  feuilles.push(pr);
+
+  // ─────────────────────────── 6. PRIX PRATIQUÉS ───────────────────────────
+  const px=nouvFeuille("Prix pratiqués");
+  px.cols=[32,16,15,15,13,13,18];
+  ajLigne(px,[TX("ANALYSE DES PRIX PRATIQUÉS",ST.titre)],26);
+  px.merges.push("A1:G1");
+  ajLigne(px,[TX("Ces médianes alimentent le « prix conseillé » proposé par l'application sur chaque produit.",ST.sous)]);
+  px.merges.push("A2:G2");
+  ajVide(px);
+  ["m³","m²","mL"].forEach(base=>{
+    const an=analysePrix(k.toutes,base);
+    if(!an) return;
+    ajBande(px,"BASE DE TARIFICATION : "+base,7);
+    ajLigne(px,[TX("Prix médian global :  "+nb(an.globale.med)+" €/"+base+" HT",ST.gras),TX(""),
+      TX(an.globale.n+" lignes chiffrées · de "+nb(an.globale.min)+" à "+nb(an.globale.max)+" € · moyenne "+nb(an.globale.moy)+" €",ST.note)],18);
+    ajVide(px);
+    const bloc=(titre,rows)=>{
+      if(!rows||!rows.length) return;
+      ajLigne(px,[TX(titre,ST.gras)]);
+      const h=ajLigne(px,[TX("Critère",ST.entete),TX("Lignes",ST.entete),TX("Médiane",ST.entete),
+        TX("Moyenne",ST.entete),TX("Mini",ST.entete),TX("Maxi",ST.entete),TX("Écart vs médiane globale",ST.entete)],30);
+      rows.forEach(r=>ajLigne(px,[TX(r.cle,ST.txt),NB(r.n,ST.ent),NB(r.med,ST.eur2),NB(r.moy,ST.eur2),
+        NB(r.min,ST.eur2),NB(r.max,ST.eur2),NB(r.ecart/100,ST.pct)]));
+      px.bars.push({ref:"C"+(h+1)+":C"+px.lignes.length,couleur:"C7A87A"});
+      ajVide(px);
+    };
+    bloc("Par essence",an.essence);
+    bloc("Par produit (type de débit)",an.produit);
+    bloc("Par qualité",an.qualite);
+    bloc("Par épaisseur",an.epaisseur);
+    bloc("Par section de pièce",an.section);
+    bloc("Par longueur",an.longueur);
+    bloc("Par volume de la ligne (effet quantité)",an.volume);
+  });
+  if(px.lignes.length<5) ajLigne(px,[TX("Pas encore assez de lignes chiffrées pour calculer des médianes fiables (2 lignes minimum par critère).",ST.note)]);
+  feuilles.push(px);
+
+  // ─────────────────────────── 7. DÉTAIL DES LIGNES ───────────────────────────
+  const dt=nouvFeuille("Détail des lignes");
+  dt.cols=[14,10,24,20,13,14,18,16,16,9,10,9,11,8,11,15,20,13,12,14];
+  ajLigne(dt,[TX("DÉTAIL DE TOUTES LES LIGNES DE DEVIS",ST.titre)],26);
+  dt.merges.push("A1:T1");
+  ajLigne(dt,[TX("Une ligne par produit commandé. Base de calcul de toutes les autres feuilles.",ST.sous)]);
+  dt.merges.push("A2:T2");
+  ajVide(dt);
+  const dtH=ajLigne(dt,[TX("Commande",ST.entete),TX("Date",ST.entete),TX("Client",ST.entete),TX("Chantier",ST.entete),
+    TX("Statut devis",ST.entete),TX("Statut commande",ST.entete),TX("Produit",ST.entete),TX("Essence",ST.entete),
+    TX("Qualité",ST.entete),TX("Ép. mm",ST.entete),TX("Larg. mm",ST.entete),TX("Long. m",ST.entete),
+    TX("Quantité",ST.entete),TX("Unité",ST.entete),TX("Base prix",ST.entete),TX("Prix HT unitaire",ST.entete),
+    TX("Options",ST.entete),TX("Suppl. options",ST.entete),TX("Volume m³",ST.entete),TX("Total ligne HT",ST.entete)],32);
+  dt.freeze=dtH;
+  const libStatut=(v)=>({brouillon:"Brouillon",attente:"En attente",production:"En production",
+    valide:"Sciée",Validée:"Sciée","En attente":"En attente","En production":"En production"})[v]||v||"";
+  let nbDet=0;
+  k.cmds.forEach(c=>{
+    const st=estRefuse(c)?"Refusé":estAccepte(c)?"Accepté":"En attente";
+    (c.lignes||[]).forEach(l=>{
+      nbDet++;
+      ajLigne(dt,[TX(c.id,ST.txt),TX(String(c.dateCreation||"").slice(0,8),ST.centre),TX(c.client||"",ST.txt),
+        TX(c.chantier||"",ST.txt),TX(st,ST.centre),TX(libStatut(c.statut),ST.centre),TX(l.produit||"",ST.txt),
+        TX(l.essence||"",ST.txt),TX(l.qualite||"",ST.txt),NB(pf(l.epaisseur),ST.ent),NB(pf(l.largeur),ST.ent),
+        NB(pf(l.longueur),ST.dec),NB(pf(l.quantite),ST.dec),TX(l.unite||"m³",ST.centre),TX(baseTarif(l),ST.centre),
+        NB(prixBaseHT(l),ST.eur2),TX((l.options||[]).join(" + "),ST.txt),NB(round(optionsSupp(l),2),ST.eur2),
+        NB(volLigneM3(l),ST.m3),NB(caLigne(l)||null,ST.eur2)]);
+    });
+  });
+  if(nbDet){
+    const a=dtH+1, b=dt.lignes.length;
+    ajLigne(dt,[TX("TOTAL",ST.totTxt)].concat(Array.from({length:17},()=>TX("",ST.totTxt)))
+      .concat([FM("SUM(S"+a+":S"+b+")",ST.totM3),FM("SUM(T"+a+":T"+b+")",ST.totEur)]));
+    dt.filtre="A"+dtH+":T"+b;
+  } else ajLigne(dt,[TX("Aucune ligne de devis enregistrée.",ST.note)]);
+  feuilles.push(dt);
+
+  // ─────────────────────────── 8. DÉTAIL SCIAGE ───────────────────────────
+  const sc=nouvFeuille("Détail sciage");
+  sc.cols=[14,12,24,20,18,16,16,9,9,9,10,11,13,13,13,11,11];
+  ajLigne(sc,[TX("DÉTAIL DES SCIAGES ENREGISTRÉS",ST.titre)],26);
+  sc.merges.push("A1:Q1");
+  ajLigne(sc,[TX("Une ligne par produit scié, telle qu'enregistrée au cubage.",ST.sous)]);
+  sc.merges.push("A2:Q2");
+  ajVide(sc);
+  const scH=ajLigne(sc,[TX("Commande",ST.entete),TX("Validé le",ST.entete),TX("Client",ST.entete),
+    TX("Chantier",ST.entete),TX("Produit",ST.entete),TX("Essence",ST.entete),TX("Qualité",ST.entete),
+    TX("Ép. mm",ST.entete),TX("Larg. mm",ST.entete),TX("Long. m",ST.entete),TX("Nb unités",ST.entete),
+    TX("Unité",ST.entete),TX("Vol. grume m³",ST.entete),TX("Vol. chargé",ST.entete),TX("Vol. réel",ST.entete),
+    TX("Rendement %",ST.entete),TX("Perte %",ST.entete)],32);
+  sc.freeze=scH;
+  let nbSc=0;
+  k.hist.forEach(h=>{
+    (h.lignes||[]).forEach(l=>{
+      nbSc++;
+      const vr=(l.volReel!=null&&l.volReel!=="")?pf(l.volReel):null;
+      ajLigne(sc,[TX(h.id,ST.txt),TX(String(h.dateValidation||"").slice(0,8),ST.centre),TX(h.client||"",ST.txt),
+        TX(h.chantier||"",ST.txt),TX(l.produit||"",ST.txt),TX(l.essence||"",ST.txt),TX(l.qualite||"",ST.txt),
+        NB(pf(l.epaisseur),ST.ent),NB(pf(l.largeur),ST.ent),NB(pf(l.longueur),ST.dec),NB(pf(l.nbUnites),ST.dec),
+        TX(l.unite||"m³",ST.centre),NB(pf(l.volumeGrume),ST.m3),NB(pf(l.volCharge),ST.m3),NB(vr,ST.m3),
+        NB(pf(l.rend),ST.dec),NB(pf(l.perte),ST.dec)]);
+    });
+  });
+  if(nbSc){
+    const a=scH+1, b=sc.lignes.length;
+    ajLigne(sc,[TX("TOTAL",ST.totTxt)].concat(Array.from({length:11},()=>TX("",ST.totTxt)))
+      .concat([FM("SUM(M"+a+":M"+b+")",ST.totM3),FM("SUM(N"+a+":N"+b+")",ST.totM3),FM("SUM(O"+a+":O"+b+")",ST.totM3),
+               TX("",ST.totTxt),TX("",ST.totTxt)]));
+    sc.filtre="A"+scH+":Q"+b;
+    sc.bars.push({ref:"N"+a+":N"+b,couleur:"A8C3A0"});
+    ajLigne(sc,[TX("Total retenu dans les indicateurs : "+vol(k.m3Scie)+" — volume réel quand il a été mesuré, volume chargé sinon.",ST.note)]);
+  } else ajLigne(sc,[TX("Aucun sciage enregistré pour le moment.",ST.note)]);
+  feuilles.push(sc);
+
+  // ── Téléchargement ──
+  const octets=classeurXlsx(feuilles);
+  const blob=new Blob([octets],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url; a.download="Recapitulatif_Verdon_"+auj.toISOString().slice(0,10)+".xlsx";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  return {feuilles:feuilles.length,lignes:nbDet,sciages:nbSc};
+}
+
 // Volume scié d'une entrée d'historique : volume réel si connu, sinon volume chargé
 function volHistorique(h){
   return round((h&&h.lignes||[]).reduce((t,l)=>{
@@ -2075,6 +2864,23 @@ export default function App(){
   const [sauvEnCours,setSauvEnCours]=useState(false);
   const [derniereSauv,setDerniereSauv]=useState(()=>{ try{ return localStorage.getItem("cubeur_derniere_sauv")||""; }catch(e){ return ""; } });
   const [devisPU,setDevisPU]=useState(()=>{ try{ return localStorage.getItem("cubeur_devis_pu")!=="0"; }catch(e){ return true; } });
+  // Récapitulatif Excel : recharge les données puis construit le classeur
+  const [recapEnCours,setRecapEnCours]=useState(false);
+  const [recapInfo,setRecapInfo]=useState("");
+  const telechargerRecap=async()=>{
+    if(recapEnCours) return;
+    setRecapEnCours(true);
+    let cmds=commandes, hist=histCmds;
+    try{ cmds=await fetchCommandes(); setCmd(cmds); }catch(e){}
+    try{ hist=await fetchHistorique(); setHistCmds(hist); }catch(e){}
+    try{
+      const r=exportRecapExcel(cmds,hist);
+      setRecapInfo("Dernier export : "+new Date().toLocaleDateString("fr-FR")+" — "+r.feuilles+" feuilles, "
+        +r.lignes+" ligne"+(r.lignes>1?"s":"")+" de devis, "+r.sciages+" ligne"+(r.sciages>1?"s":"")+" de sciage.");
+      showToast("Récapitulatif Excel téléchargé ✓");
+    }catch(e){ showToast("Erreur : "+e.message,"error"); }
+    setRecapEnCours(false);
+  };
   // Filtre par nom de client, chantier ou numéro de commande
   const filtreCmd=(arr)=>{
     const q=cmdSearch.trim().toLowerCase();
@@ -3799,6 +4605,36 @@ export default function App(){
                 </div>
               </>;
             })()}
+          </Card>
+
+          <Card title="Récapitulatif & indicateurs (Excel)">
+            <p style={{fontSize:13,color:"#a09080",lineHeight:1.7,marginBottom:12}}>
+              Un seul fichier Excel, 8 feuilles, tous les chiffres calculés automatiquement à partir des devis et de l'historique de sciage.
+            </p>
+            <div style={{fontSize:12.5,color:"#8A9BB0",lineHeight:1.75,marginBottom:14}}>
+              {[["Synthèse","tous les indicateurs en un coup d'œil : taux de transformation, CA signé / perdu / restant à scier, panier moyen, m³ sciés, rendement, délais, meilleurs clients, prix médian"],
+                ["Devis & conversion","mois par mois et client par client : devis émis, acceptés, refusés, taux de transformation, CA signé et CA perdu"],
+                ["Production","m³ sciés par mois et par client, volume moyen, rendement, délai entre le devis et le sciage"],
+                ["Clients","une ligne par client : devis, taux de transformation, CA, panier moyen, m³ commandés et sciés, prix réalisé au m³"],
+                ["Produits & essences","volumes, chiffre d'affaires, part du CA et prix médian par produit, par essence et par qualité"],
+                ["Prix pratiqués","les médianes par critère qui alimentent le prix conseillé"],
+                ["Détail des lignes","chaque ligne de devis, filtrable"],
+                ["Détail sciage","chaque produit scié avec volumes et rendement"]].map(f=>(
+                <div key={f[0]} style={{marginBottom:5}}>
+                  <span style={{color:"#E8ECEF",fontWeight:700}}>{f[0]}</span>
+                  <span style={{color:"#5A6472"}}> — {f[1]}</span>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={telechargerRecap} disabled={recapEnCours}
+              style={{...S.btnBig,...(recapEnCours?S.btnDis:{})}}>
+              {recapEnCours?"Préparation du fichier…":"⬇ Télécharger le récapitulatif complet (Excel)"}
+            </button>
+            {recapInfo&&<div style={{fontSize:11.5,color:"#34C759",marginTop:8}}>{recapInfo}</div>}
+            <div style={{fontSize:11,color:"#5A6472",lineHeight:1.6,marginTop:8}}>
+              Les données sont rechargées avant l'export : les chiffres sont ceux de l'instant.
+              Les brouillons ne sont jamais comptés. Tous les montants sont hors taxes.
+            </div>
           </Card>
 
           <Card title="Analyse des prix pratiqués">
